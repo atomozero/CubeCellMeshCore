@@ -44,8 +44,8 @@ private:
     uint8_t sharedSecret[MC_SHARED_SECRET_SIZE];
     bool hasSecret;
 
-    // AES-128 cipher instance
-    AESTiny128 aes;
+    // AES-128 cipher instance (use full AES128, not AESTiny128)
+    AES128 aes;
 
     /**
      * XOR a block with another
