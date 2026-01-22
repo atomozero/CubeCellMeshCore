@@ -90,16 +90,21 @@ public:
         Serial.printf("[KX] myPriv[0-7]: ");
         for(int i=0; i<8; i++) Serial.printf("%02X ", myPrivateKey[i]);
         Serial.printf("\n\r");
-        Serial.printf("[KX] theirPub[0-7]: ");
-        for(int i=0; i<8; i++) Serial.printf("%02X ", theirPublicKey[i]);
+        Serial.printf("[KX] theirPub (full 32):\n\r[KX]   ");
+        for(int i=0; i<16; i++) Serial.printf("%02X ", theirPublicKey[i]);
+        Serial.printf("\n\r[KX]   ");
+        for(int i=16; i<32; i++) Serial.printf("%02X ", theirPublicKey[i]);
         Serial.printf("\n\r");
 
         // Use ed25519_key_exchange (converts Ed25519 pubkey to X25519 internally)
         // This is what MeshCore uses
         ed25519_key_exchange(secret, theirPublicKey, myPrivateKey);
 
-        Serial.printf("[KX] Ed25519 result[0-7]: ");
-        for(int i=0; i<8; i++) Serial.printf("%02X ", secret[i]);
+        Serial.printf("[KX] Ed25519 result (full 32 bytes):\n\r");
+        Serial.printf("[KX]   ");
+        for(int i=0; i<16; i++) Serial.printf("%02X ", secret[i]);
+        Serial.printf("\n\r[KX]   ");
+        for(int i=16; i<32; i++) Serial.printf("%02X ", secret[i]);
         Serial.printf("\n\r");
 
         return true;
@@ -231,7 +236,10 @@ public:
             return 0;  // MAC verification failed
         }
 
-        // Set AES key
+        // Set AES key (first 16 bytes of shared secret)
+        Serial.printf("[AES] Key[0-15]: ");
+        for(int i=0; i<16; i++) Serial.printf("%02X ", key[i]);
+        Serial.printf("\n\r");
         aes.setKey(key, MC_AES_KEY_SIZE);
 
         // Decrypt blocks (ECB mode - each block independently)
@@ -342,12 +350,22 @@ public:
         Serial.printf("\n\r");
 
         // Extract password (remaining bytes, may include padding zeros)
+        // MeshCore format: [timestamp:4][password:up to 15 chars][zero padding]
         uint8_t pwdLen = 0;
         for (uint8_t i = ANON_REQ_TIMESTAMP_SIZE; i < decryptedLen && i < maxPwdLen + ANON_REQ_TIMESTAMP_SIZE; i++) {
             if (decrypted[i] == 0) break;  // Null terminator or padding
             password[pwdLen++] = decrypted[i];
         }
         password[pwdLen] = '\0';
+
+        // Debug: if password is empty, show raw bytes for analysis
+        if (pwdLen == 0) {
+            Serial.printf("[CRYPTO] WARNING: No password found! Raw decrypted[4-15]: ");
+            for(int i=4; i<16 && i<decryptedLen; i++) {
+                Serial.printf("%02X(%c) ", decrypted[i], (decrypted[i]>=32 && decrypted[i]<127)?decrypted[i]:'.');
+            }
+            Serial.printf("\n\r");
+        }
 
         // Clear decrypted data
         memset(decrypted, 0, sizeof(decrypted));
