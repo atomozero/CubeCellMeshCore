@@ -349,23 +349,46 @@ public:
         for(int i=4; i<12 && i<decryptedLen; i++) Serial.printf("%02X ", decrypted[i]);
         Serial.printf("\n\r");
 
-        // Extract password (remaining bytes, may include padding zeros)
-        // MeshCore format: [timestamp:4][password:up to 15 chars][zero padding]
+        // Extract password - try multiple MeshCore formats:
+        // Format A (Repeater): [timestamp:4][password:N]
+        // Format B (Room Server): [timestamp:4][sync_since:4][password:N]
         uint8_t pwdLen = 0;
-        for (uint8_t i = ANON_REQ_TIMESTAMP_SIZE; i < decryptedLen && i < maxPwdLen + ANON_REQ_TIMESTAMP_SIZE; i++) {
-            if (decrypted[i] == 0) break;  // Null terminator or padding
-            password[pwdLen++] = decrypted[i];
+
+        // Try offset 4 first (Repeater format)
+        if (decrypted[4] >= 32 && decrypted[4] <= 126) {
+            for (uint8_t i = 4; i < decryptedLen && pwdLen < maxPwdLen; i++) {
+                if (decrypted[i] < 32 || decrypted[i] > 126) break;
+                password[pwdLen++] = decrypted[i];
+            }
+            Serial.printf("[CRYPTO] Format A (offset 4): '%s'\n\r", password);
+        }
+
+        // If offset 4 failed, try offset 8 (Room Server format with sync_since)
+        if (pwdLen == 0 && decryptedLen > 8) {
+            if (decrypted[8] >= 32 && decrypted[8] <= 126) {
+                for (uint8_t i = 8; i < decryptedLen && pwdLen < maxPwdLen; i++) {
+                    if (decrypted[i] < 32 || decrypted[i] > 126) break;
+                    password[pwdLen++] = decrypted[i];
+                }
+                Serial.printf("[CRYPTO] Format B (offset 8): '%s'\n\r", password);
+            }
+        }
+
+        // Last resort: find first alphabetic character
+        if (pwdLen == 0) {
+            for (uint8_t i = 4; i < decryptedLen; i++) {
+                if ((decrypted[i] >= 'a' && decrypted[i] <= 'z') ||
+                    (decrypted[i] >= 'A' && decrypted[i] <= 'Z')) {
+                    for (uint8_t j = i; j < decryptedLen && pwdLen < maxPwdLen; j++) {
+                        if (decrypted[j] < 32 || decrypted[j] > 126) break;
+                        password[pwdLen++] = decrypted[j];
+                    }
+                    Serial.printf("[CRYPTO] Fallback (offset %d): '%s'\n\r", i, password);
+                    break;
+                }
+            }
         }
         password[pwdLen] = '\0';
-
-        // Debug: if password is empty, show raw bytes for analysis
-        if (pwdLen == 0) {
-            Serial.printf("[CRYPTO] WARNING: No password found! Raw decrypted[4-15]: ");
-            for(int i=4; i<16 && i<decryptedLen; i++) {
-                Serial.printf("%02X(%c) ", decrypted[i], (decrypted[i]>=32 && decrypted[i]<127)?decrypted[i]:'.');
-            }
-            Serial.printf("\n\r");
-        }
 
         // Clear decrypted data
         memset(decrypted, 0, sizeof(decrypted));

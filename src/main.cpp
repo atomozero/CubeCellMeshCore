@@ -2598,16 +2598,16 @@ bool processAnonRequest(MCPacket* pkt) {
     LOG_RAW("\n\r");
 
     // Decrypt the request - pass from sender pubkey onwards
-    // ANON_REQ format (from MeshCore): [destHash:1][sender_pubkey:32][MAC:2][ciphertext]
+    // ANON_REQ format: [destHash:1][srcHash:1][sender_pubkey:32][MAC:2][ciphertext]
     // decryptAnonReq expects: [sender_pubkey:32][MAC:2][ciphertext]
     uint32_t timestamp;
     char password[32];
 
-    // Skip only destHash[0], sender pubkey starts at [1]
+    // Skip destHash[0] and srcHash[1], sender pubkey starts at [2]
     uint8_t pwdLen = meshCrypto.decryptAnonReq(
         &timestamp, password, sizeof(password) - 1,
-        &pkt->payload[1],     // From sender pubkey onwards (skip only destHash)
-        pkt->payloadLen - 1,  // Length excluding destHash
+        &pkt->payload[2],     // From sender pubkey onwards (skip destHash + srcHash)
+        pkt->payloadLen - 2,  // Length excluding both hashes
         nodeIdentity.getPrivateKey()
     );
 
