@@ -8,8 +8,14 @@ CubeCellMeshCore is a MeshCore-compatible repeater firmware for Heltec CubeCell 
 
 ```
 src/
-├── main.cpp              # Main firmware (~3300 lines)
-├── main.h                # Configuration defines, global declarations
+├── main.cpp              # Main firmware (~3070 lines)
+├── main.h                # Configuration defines
+│
+├── core/                 # Core system modules (extracted)
+│   ├── globals.h         # Global variable declarations (extern)
+│   ├── globals.cpp       # Global variable definitions
+│   ├── Led.h/.cpp        # LED signaling (NeoPixel/GPIO)
+│   └── Config.h/.cpp     # EEPROM configuration management
 │
 └── mesh/                 # MeshCore protocol implementation
     ├── Advert.h          # ADVERT packet generation
@@ -32,28 +38,27 @@ docs/
 └── API.md                # API reference
 ```
 
-## Planned Modular Structure (Future)
+## Future Modular Structure
+
+Additional modules can be extracted from main.cpp:
 
 ```
 src/
-├── main.cpp              # Entry point, setup(), loop()
-├── main.h                # Configuration defines
-│
-├── core/                 # Core system modules
-│   ├── Config.cpp/.h     # EEPROM configuration management
-│   ├── Led.cpp/.h        # LED signaling (NeoPixel/GPIO)
-│   └── Radio.cpp/.h      # SX1262 radio management
-│
 ├── handlers/             # Packet and command handlers
-│   ├── SerialCommands.*  # Serial console command processing
-│   ├── RemoteCommands.*  # Remote CLI via mesh network
-│   └── PacketHandler.*   # Incoming packet processing
+│   ├── SerialCommands.*  # Serial console command processing (~1100 lines)
+│   ├── RemoteCommands.*  # Remote CLI via mesh network (~200 lines)
+│   └── PacketHandler.*   # Incoming packet processing (~700 lines)
 │
 ├── services/             # High-level services
-│   └── Messaging.*       # ADVERT, alerts, reports
+│   └── Messaging.*       # ADVERT, alerts, reports (~500 lines)
 │
-└── mesh/                 # MeshCore protocol (unchanged)
+└── core/
+    └── Radio.cpp/.h      # SX1262 radio management
 ```
+
+**Note**: Further module extraction requires careful handling of the CubeCell-specific
+includes (`cyPm.c`, `innerWdt.h`) which contain function definitions and cannot be
+included from multiple compilation units.
 
 ## Module Descriptions
 

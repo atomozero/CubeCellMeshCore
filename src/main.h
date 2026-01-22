@@ -255,6 +255,8 @@
 // Public key size for destinations
 #define REPORT_PUBKEY_SIZE  32          // Ed25519 public key size
 
+#ifndef NODECONFIG_DEFINED
+#define NODECONFIG_DEFINED
 struct NodeConfig {
     uint16_t magic;                         // Magic number to validate
     uint8_t version;                        // Config version
@@ -273,24 +275,10 @@ struct NodeConfig {
     uint8_t alertDestPubKey[REPORT_PUBKEY_SIZE]; // Alert destination public key
     uint8_t reserved[4];                    // Reserved for future use
 };
+#endif
 
-// Default configuration
-const NodeConfig defaultConfig = {
-    EEPROM_MAGIC,
-    EEPROM_VERSION,
-    1,      // powerSaveMode = balanced
-    false,  // rxBoostEnabled
-    true,   // deepSleepEnabled
-    "admin",  // Default admin password
-    "guest",  // Default guest password
-    false,  // reportEnabled
-    8,      // reportHour (08:00)
-    0,      // reportMinute
-    {0},    // reportDestPubKey (empty)
-    false,  // alertEnabled
-    {0},    // alertDestPubKey (empty)
-    {0}     // reserved
-};
+// Default configuration - defined in core/Config.cpp
+extern const NodeConfig defaultConfig;
 
 //=============================================================================
 // CubeCell specific
@@ -312,247 +300,24 @@ using std::min;
 #include "innerWdt.h"
 extern uint32_t systime;
 
-// Radio instance
-SX1262 radio = new Module(RADIOLIB_BUILTIN_MODULE);
-
-// NeoPixel
-#ifdef MC_SIGNAL_NEOPIXEL
-#include "CubeCell_NeoPixel.h"
-CubeCell_NeoPixel pixels(1, RGB, NEO_GRB + NEO_KHZ800);
-#endif
-
 #endif // CUBECELL
 
 //=============================================================================
-// Global state
+// Include globals (extern declarations for all global variables)
 //=============================================================================
+#include "core/globals.h"
 
-// Radio state
-volatile bool dio1Flag = false;
-bool isReceiving = false;
-int radioError = RADIOLIB_ERR_NONE;
-
-// Power saving
-bool deepSleepEnabled = MC_DEEP_SLEEP_ENABLED;
-bool rxBoostEnabled = MC_RX_BOOST_ENABLED;
-uint8_t powerSaveMode = 1;  // 0=perf, 1=balanced, 2=powersave
+//=============================================================================
+// Constants
+//=============================================================================
 
 // Boot safe period - disable deep sleep for first N seconds to allow serial commands
 #define BOOT_SAFE_PERIOD_MS  120000  // 2 minutes
-uint32_t bootTime = 0;
 
-// Pending ADVERT after time sync
-uint32_t pendingAdvertTime = 0;  // 0 = no pending, >0 = millis() when to send
-
-// Statistics
-uint32_t rxCount = 0;
-uint32_t txCount = 0;
-uint32_t fwdCount = 0;      // Forwarded packets
-uint32_t errCount = 0;      // Error count
-uint32_t crcErrCount = 0;   // CRC errors
-uint32_t advTxCount = 0;    // ADVERT packets sent
-uint32_t advRxCount = 0;    // ADVERT packets received
-
-// Last packet info
-int16_t lastRssi = 0;
-int8_t lastSnr = 0;
-
-// Error recovery
-uint8_t radioErrorCount = 0;
-
-// Pending reboot (for CLI reboot command)
-bool pendingReboot = false;
-uint32_t rebootTime = 0;
-
-// Daily report configuration
-bool reportEnabled = false;
-uint8_t reportHour = 8;
-uint8_t reportMinute = 0;
-uint8_t reportDestPubKey[REPORT_PUBKEY_SIZE] = {0};
-uint32_t lastReportDay = 0;  // Day of last sent report (to avoid duplicates)
-
-// Node alert configuration
-bool alertEnabled = false;
-uint8_t alertDestPubKey[REPORT_PUBKEY_SIZE] = {0};
-
-// Node ID (generated at startup if MC_NODE_ID is 0)
-uint32_t nodeId = MC_NODE_ID;
-
-// Timing for actively receiving detection
-uint32_t activeReceiveStart = 0;
-uint32_t preambleTimeMsec = 50;     // Calculated at startup
-uint32_t maxPacketTimeMsec = 500;   // Calculated at startup
-uint32_t slotTimeMsec = 20;         // Calculated at startup
-
-//=============================================================================
-// Packet ID cache (to avoid re-forwarding)
-//=============================================================================
-class PacketIdCache {
-private:
-    uint32_t ids[MC_PACKET_ID_CACHE];
-    uint8_t pos;
-
-public:
-    void clear() {
-        memset(ids, 0, sizeof(ids));
-        pos = 0;
-    }
-
-    // Returns true if ID is new (not seen before)
-    bool addIfNew(uint32_t id) {
-        // Check if already seen
-        for (uint8_t i = 0; i < MC_PACKET_ID_CACHE; i++) {
-            if (ids[i] == id) return false;
-        }
-        // Add new ID
-        ids[pos] = id;
-        pos = (pos + 1) % MC_PACKET_ID_CACHE;
-        return true;
-    }
-};
-
-PacketIdCache packetCache;
-
-//=============================================================================
-// Seen Nodes Tracker
-//=============================================================================
-#define MC_MAX_SEEN_NODES   16
-
-struct SeenNode {
-    uint8_t hash;           // 1-byte node hash from path
-    int16_t lastRssi;       // Last RSSI
-    int8_t lastSnr;         // Last SNR (x4 for 0.25dB resolution)
-    uint8_t pktCount;       // Packets seen from this node (saturates at 255)
-    uint32_t lastSeen;      // millis() when last seen
-    char name[12];          // Node name (truncated, from ADVERT)
-};
-
-class SeenNodesTracker {
-private:
-    SeenNode nodes[MC_MAX_SEEN_NODES];
-    uint8_t count;
-
-public:
-    void clear() {
-        memset(nodes, 0, sizeof(nodes));
-        count = 0;
-    }
-
-    // Update or add a node, returns true if new node
-    bool update(uint8_t hash, int16_t rssi, int8_t snr, const char* name = nullptr) {
-        // Check if already known
-        for (uint8_t i = 0; i < count; i++) {
-            if (nodes[i].hash == hash) {
-                nodes[i].lastRssi = rssi;
-                nodes[i].lastSnr = snr;
-                nodes[i].lastSeen = millis();
-                if (nodes[i].pktCount < 255) nodes[i].pktCount++;
-                // Update name if provided and node doesn't have one yet
-                if (name && name[0] != '\0' && nodes[i].name[0] == '\0') {
-                    strncpy(nodes[i].name, name, sizeof(nodes[i].name) - 1);
-                    nodes[i].name[sizeof(nodes[i].name) - 1] = '\0';
-                }
-                return false;  // Not new
-            }
-        }
-
-        // Add new node
-        if (count < MC_MAX_SEEN_NODES) {
-            nodes[count].hash = hash;
-            nodes[count].lastRssi = rssi;
-            nodes[count].lastSnr = snr;
-            nodes[count].pktCount = 1;
-            nodes[count].lastSeen = millis();
-            if (name && name[0] != '\0') {
-                strncpy(nodes[count].name, name, sizeof(nodes[count].name) - 1);
-                nodes[count].name[sizeof(nodes[count].name) - 1] = '\0';
-            } else {
-                nodes[count].name[0] = '\0';
-            }
-            count++;
-            return true;  // New node
-        } else {
-            // Replace oldest node
-            uint8_t oldest = 0;
-            uint32_t oldestTime = nodes[0].lastSeen;
-            for (uint8_t i = 1; i < MC_MAX_SEEN_NODES; i++) {
-                if (nodes[i].lastSeen < oldestTime) {
-                    oldest = i;
-                    oldestTime = nodes[i].lastSeen;
-                }
-            }
-            nodes[oldest].hash = hash;
-            nodes[oldest].lastRssi = rssi;
-            nodes[oldest].lastSnr = snr;
-            nodes[oldest].pktCount = 1;
-            nodes[oldest].lastSeen = millis();
-            if (name && name[0] != '\0') {
-                strncpy(nodes[oldest].name, name, sizeof(nodes[oldest].name) - 1);
-                nodes[oldest].name[sizeof(nodes[oldest].name) - 1] = '\0';
-            } else {
-                nodes[oldest].name[0] = '\0';
-            }
-            return true;
-        }
-    }
-
-    uint8_t getCount() const { return count; }
-
-    const SeenNode* getNode(uint8_t idx) const {
-        if (idx < count) return &nodes[idx];
-        return nullptr;
-    }
-};
-
-SeenNodesTracker seenNodes;
-
-// Contact management and message crypto
-ContactManager contactMgr;
-MessageCrypto msgCrypto;
-
-//=============================================================================
-// TX Queue
-//=============================================================================
-class TxQueue {
-private:
-    MCPacket queue[MC_TX_QUEUE_SIZE];
-    uint8_t count;
-
-public:
-    void clear() {
-        count = 0;
-        for (uint8_t i = 0; i < MC_TX_QUEUE_SIZE; i++) {
-            queue[i].clear();
-        }
-    }
-
-    bool add(const MCPacket* pkt) {
-        if (count >= MC_TX_QUEUE_SIZE) {
-            // Queue full, drop oldest
-            for (uint8_t i = 0; i < MC_TX_QUEUE_SIZE - 1; i++) {
-                queue[i] = queue[i + 1];
-            }
-            count = MC_TX_QUEUE_SIZE - 1;
-        }
-        queue[count++] = *pkt;
-        return true;
-    }
-
-    bool pop(MCPacket* pkt) {
-        if (count == 0) return false;
-        *pkt = queue[0];
-        // Shift remaining
-        for (uint8_t i = 0; i < count - 1; i++) {
-            queue[i] = queue[i + 1];
-        }
-        count--;
-        return true;
-    }
-
-    uint8_t getCount() const { return count; }
-};
-
-TxQueue txQueue;
+// ADVERT beacon timing
+#define ADVERT_INTERVAL_MS      300000  // 5 minutes default
+#define ADVERT_ENABLED          true
+#define ADVERT_AFTER_SYNC_MS    5000    // Send ADVERT 5 seconds after time sync
 
 //=============================================================================
 // Function prototypes
@@ -576,14 +341,7 @@ void enterDeepSleep();
 void enterLightSleep(uint8_t ms);
 void applyPowerSettings();
 
-// LED signaling
-void initLed();
-void ledRxOn();
-void ledTxOn();
-void ledRedSolid();
-void ledGreenBlink();
-void ledBlueDoubleBlink();
-void ledOff();
+// LED signaling - see core/Led.h
 
 // Serial commands
 #ifndef SILENT
@@ -591,10 +349,7 @@ void checkSerial();
 void processCommand(char* cmd);
 #endif
 
-// Configuration
-void loadConfig();
-void saveConfig();
-void resetConfig();
+// Configuration - see core/Config.h
 
 // Ping / Test
 void sendPing();
@@ -608,25 +363,3 @@ void checkAdvertBeacon();
 bool processAnonRequest(MCPacket* pkt);
 bool sendLoginResponse(const uint8_t* clientPubKey, const uint8_t* sharedSecret,
                        bool isAdmin, uint8_t permissions, const uint8_t* outPath, uint8_t outPathLen);
-
-//=============================================================================
-// Global Managers
-//=============================================================================
-IdentityManager nodeIdentity;
-TimeSync timeSync;
-AdvertGenerator advertGen;
-TelemetryManager telemetry;
-RepeaterHelper repeaterHelper;
-PacketLogger packetLogger;
-SessionManager sessionManager;
-MeshCrypto meshCrypto;
-
-// ADVERT beacon timing
-#define ADVERT_INTERVAL_MS      300000  // 5 minutes default
-#define ADVERT_ENABLED          true
-#define ADVERT_AFTER_SYNC_MS    5000    // Send ADVERT 5 seconds after time sync
-
-// ISR - CubeCell doesn't use IRAM_ATTR
-void onDio1Rise() {
-    dio1Flag = true;
-}

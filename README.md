@@ -71,11 +71,16 @@ reboot          - Restart device
 
 ```
 src/
-├── main.cpp          # Main firmware (~3300 lines)
+├── main.cpp          # Main firmware (~3070 lines)
 ├── main.h            # Configuration and defines
+├── core/             # Core modules
+│   ├── globals.h/.cpp  # Global variables
+│   ├── Led.h/.cpp      # LED signaling
+│   └── Config.h/.cpp   # EEPROM config
 └── mesh/             # MeshCore protocol
     ├── Advert.h      # ADVERT generation
     ├── Contacts.h    # Contact management
+    ├── Crypto.h      # Encryption helpers
     ├── Identity.h    # Ed25519 keys
     ├── Packet.h      # Packet format
     ├── Repeater.h    # Forwarding stats
