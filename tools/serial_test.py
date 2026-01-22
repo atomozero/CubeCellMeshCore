@@ -190,8 +190,8 @@ class SerialTester:
         # Location
         self.test("Location", "location", r"(location|Lat|Lon|not set|\d+\.\d+)")
 
-        # Node type
-        self.test("Node type info", "status", r"(repeater|chat|0x[0-9a-fA-F]+)")
+        # Verify status shows valid firmware info
+        self.test("Firmware version", "status", r"FW:\d+\.\d+\.\d+")
 
         # Password display
         self.test("Password display", "passwd", r"(admin|guest|password|Admin:|Guest:)")
