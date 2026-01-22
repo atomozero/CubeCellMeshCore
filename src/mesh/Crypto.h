@@ -76,13 +76,12 @@ public:
     MeshCrypto() : hasSecret(false) {}
 
     /**
-     * Calculate ECDH shared secret
-     * Tries X25519 first (ephemeral key already in Montgomery form),
-     * then falls back to Ed25519 key exchange if that fails.
+     * Calculate ECDH shared secret using Ed25519 key exchange
+     * MeshCore uses ed25519_key_exchange which converts Ed25519→X25519 internally
      *
      * @param secret Output shared secret (32 bytes)
      * @param myPrivateKey Our Ed25519 private key (64-byte expanded key)
-     * @param theirPublicKey Their public key (32 bytes, may be Ed25519 or X25519)
+     * @param theirPublicKey Their Ed25519 public key (32 bytes)
      * @return true if successful
      */
     static bool calcSharedSecret(uint8_t* secret, const uint8_t* myPrivateKey,
@@ -95,22 +94,14 @@ public:
         for(int i=0; i<8; i++) Serial.printf("%02X ", theirPublicKey[i]);
         Serial.printf("\n\r");
 
-        // Try X25519 (assumes ephemeral key is already in Montgomery/X25519 form)
-        x25519_key_exchange(secret, theirPublicKey, myPrivateKey);
-        Serial.printf("[KX] X25519 result[0-7]: ");
+        // Use ed25519_key_exchange (converts Ed25519 pubkey to X25519 internally)
+        // This is what MeshCore uses
+        ed25519_key_exchange(secret, theirPublicKey, myPrivateKey);
+
+        Serial.printf("[KX] Ed25519 result[0-7]: ");
         for(int i=0; i<8; i++) Serial.printf("%02X ", secret[i]);
         Serial.printf("\n\r");
 
-        return true;
-    }
-
-    /**
-     * Calculate ECDH shared secret using Ed25519 key exchange
-     * (converts Ed25519 pubkey to X25519 internally)
-     */
-    static bool calcSharedSecretEd25519(uint8_t* secret, const uint8_t* myPrivateKey,
-                                        const uint8_t* theirPublicKey) {
-        ed25519_key_exchange(secret, theirPublicKey, myPrivateKey);
         return true;
     }
 
@@ -161,6 +152,10 @@ public:
                            const uint8_t* data, uint16_t len) {
         uint8_t computed[MC_CIPHER_MAC_SIZE];
         computeHMAC(computed, key, data, len);
+
+        // Debug: show MAC comparison
+        Serial.printf("[MAC] received=%02X%02X computed=%02X%02X over %d bytes\n\r",
+                      mac[0], mac[1], computed[0], computed[1], len);
 
         // Constant-time comparison
         uint8_t diff = 0;
@@ -277,8 +272,11 @@ public:
     uint8_t decryptAnonReq(uint32_t* timestamp, char* password, uint8_t maxPwdLen,
                            const uint8_t* payload, uint16_t payloadLen,
                            const uint8_t* myPrivateKey) {
-        // Minimum: 32 (ephemeral pubkey) + 2 (MAC) + 16 (min encrypted block)
-        if (payloadLen < 32 + MC_CIPHER_MAC_SIZE + MC_AES_BLOCK_SIZE) {
+        // Minimum: 32 (ephemeral pubkey) + 2 (MAC) + 15 (min encrypted - timestamp + short pwd)
+        // Note: 51-byte ANON_REQ with srcHash means: 51 - 2(hashes) = 49 bytes for ephemeral+MAC+cipher
+        Serial.printf("[CRYPTO] decryptAnonReq: payloadLen=%d\n\r", payloadLen);
+        if (payloadLen < 32 + MC_CIPHER_MAC_SIZE + 15) {
+            Serial.printf("[CRYPTO] Payload too short: %d < %d\n\r", payloadLen, 32 + MC_CIPHER_MAC_SIZE + 15);
             return 0;
         }
 
@@ -337,6 +335,11 @@ public:
                      (decrypted[1] << 8) |
                      (decrypted[2] << 16) |
                      (decrypted[3] << 24);
+
+        Serial.printf("[CRYPTO] Extracted timestamp: %lu (0x%08lX)\n\r", *timestamp, *timestamp);
+        Serial.printf("[CRYPTO] Password bytes[4-11]: ");
+        for(int i=4; i<12 && i<decryptedLen; i++) Serial.printf("%02X ", decrypted[i]);
+        Serial.printf("\n\r");
 
         // Extract password (remaining bytes, may include padding zeros)
         uint8_t pwdLen = 0;
