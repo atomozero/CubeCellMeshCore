@@ -93,13 +93,42 @@ lib/
 
 docs/
 ├── ARCHITECTURE.md   # System architecture
-└── API.md            # API reference
+├── API.md            # API reference
+└── TESTING.md        # Test procedures
+
+tools/
+├── serial_test.py    # Automated serial tests
+├── quick_test.sh     # Quick test script
+└── build_test.sh     # Build verification
 ```
 
 ## Documentation
 
 - [Architecture Overview](docs/ARCHITECTURE.md) - System design and data flow
 - [API Reference](docs/API.md) - Module APIs and serial commands
+- [Testing Guide](docs/TESTING.md) - Test procedures and verification
+
+## Testing
+
+### Automated Serial Tests
+```bash
+# Install pyserial if needed
+pip install pyserial
+
+# Run tests (auto-detect port)
+python tools/serial_test.py
+
+# Run with specific port
+python tools/serial_test.py /dev/ttyUSB0
+
+# Run full test suite (includes state-changing tests)
+python tools/serial_test.py --full
+```
+
+### Build Verification
+```bash
+./tools/build_test.sh
+```
 
 ## MeshCore Compatibility
 
