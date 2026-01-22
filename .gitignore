@@ -1,0 +1,29 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.vscode/
+.clang_complete
+.gcc-flags.json
+
+# Build files
+*.o
+*.a
+*.elf
+*.hex
+*.bin
+*.cyacd
+
+# IDE
+*.swp
+*.swo
+*~
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+backup/
+*.bak
