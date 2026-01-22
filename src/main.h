@@ -17,7 +17,7 @@
 //#define SILENT                  // Disable ALL serial output
 #define LITE_MODE                 // Remove non-essential features for space saving
 #define MINIMAL_DEBUG             // Minimal debug output (no fancy ANSI tables)
-#define ANSI_COLORS               // Enable ANSI colors even with MINIMAL_DEBUG
+//#define ANSI_COLORS             // Disabled to save ~500 bytes Flash
 
 // Node identity - set to 0 to auto-generate from chip ID
 #define MC_NODE_ID          0
@@ -245,7 +245,7 @@
 //=============================================================================
 // EEPROM Configuration
 //=============================================================================
-#define EEPROM_SIZE         256     // Increased for Identity storage
+#define EEPROM_SIZE         512     // NodeConfig(~110) + Identity(~132) need ~260 bytes minimum
 #define EEPROM_MAGIC        0xCC3C      // Magic number to validate config
 #define EEPROM_VERSION      4           // Config version (4 = added node alert)
 

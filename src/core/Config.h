@@ -14,7 +14,7 @@
 // EEPROM Configuration defines (duplicated from main.h to avoid include issues)
 //=============================================================================
 #ifndef EEPROM_SIZE
-#define EEPROM_SIZE         256
+#define EEPROM_SIZE         512
 #endif
 #ifndef EEPROM_MAGIC
 #define EEPROM_MAGIC        0xCC3C

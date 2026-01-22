@@ -76,15 +76,40 @@ public:
     MeshCrypto() : hasSecret(false) {}
 
     /**
-     * Calculate ECDH shared secret using orlp/ed25519 key exchange
+     * Calculate ECDH shared secret
+     * Tries X25519 first (ephemeral key already in Montgomery form),
+     * then falls back to Ed25519 key exchange if that fails.
+     *
      * @param secret Output shared secret (32 bytes)
-     * @param myPrivateKey Our Ed25519 private key (32-byte seed)
-     * @param theirPublicKey Their Ed25519 public key
+     * @param myPrivateKey Our Ed25519 private key (64-byte expanded key)
+     * @param theirPublicKey Their public key (32 bytes, may be Ed25519 or X25519)
      * @return true if successful
      */
     static bool calcSharedSecret(uint8_t* secret, const uint8_t* myPrivateKey,
                                  const uint8_t* theirPublicKey) {
-        // Use orlp/ed25519 key exchange (handles Ed25519→X25519 conversion internally)
+        // Debug: show keys
+        Serial.printf("[KX] myPriv[0-7]: ");
+        for(int i=0; i<8; i++) Serial.printf("%02X ", myPrivateKey[i]);
+        Serial.printf("\n\r");
+        Serial.printf("[KX] theirPub[0-7]: ");
+        for(int i=0; i<8; i++) Serial.printf("%02X ", theirPublicKey[i]);
+        Serial.printf("\n\r");
+
+        // Try X25519 (assumes ephemeral key is already in Montgomery/X25519 form)
+        x25519_key_exchange(secret, theirPublicKey, myPrivateKey);
+        Serial.printf("[KX] X25519 result[0-7]: ");
+        for(int i=0; i<8; i++) Serial.printf("%02X ", secret[i]);
+        Serial.printf("\n\r");
+
+        return true;
+    }
+
+    /**
+     * Calculate ECDH shared secret using Ed25519 key exchange
+     * (converts Ed25519 pubkey to X25519 internally)
+     */
+    static bool calcSharedSecretEd25519(uint8_t* secret, const uint8_t* myPrivateKey,
+                                        const uint8_t* theirPublicKey) {
         ed25519_key_exchange(secret, theirPublicKey, myPrivateKey);
         return true;
     }
@@ -266,13 +291,39 @@ public:
         // Calculate shared secret with ephemeral key
         uint8_t secret[MC_SHARED_SECRET_SIZE];
         if (!calcSharedSecret(secret, myPrivateKey, ephemeralPub)) {
+            Serial.printf("[CRYPTO] calcSharedSecret failed\n\r");
             return 0;
         }
+
+        // Debug: show shared secret (first 8 bytes)
+        Serial.printf("[CRYPTO] SharedSecret[0-7]: ");
+        for(int i=0; i<8; i++) Serial.printf("%02X ", secret[i]);
+        Serial.printf("\n\r");
+
+        // Debug: show MAC and ciphertext
+        Serial.printf("[CRYPTO] encryptedLen=%d MAC=%02X%02X cipher[0-3]=%02X%02X%02X%02X\n\r",
+                      encryptedLen, encrypted[0], encrypted[1],
+                      encrypted[2], encrypted[3], encrypted[4], encrypted[5]);
 
         // Decrypt (handles [MAC:2][ciphertext] format)
         uint8_t decrypted[128];
         uint16_t decryptedLen = MACThenDecrypt(decrypted, encrypted, encryptedLen,
                                                 secret, secret);
+
+        // Debug: show decryption result
+        Serial.printf("[CRYPTO] MACThenDecrypt returned %d bytes\n\r", decryptedLen);
+        if (decryptedLen > 0) {
+            Serial.printf("[CRYPTO] Decrypted ALL: ");
+            for(int i=0; i<decryptedLen; i++) Serial.printf("%02X ", decrypted[i]);
+            Serial.printf("\n\r");
+            // Try to show as ASCII
+            Serial.printf("[CRYPTO] As ASCII: '");
+            for(int i=0; i<decryptedLen; i++) {
+                char c = decrypted[i];
+                Serial.printf("%c", (c >= 32 && c < 127) ? c : '.');
+            }
+            Serial.printf("'\n\r");
+        }
 
         // Clear secret immediately
         memset(secret, 0, MC_SHARED_SECRET_SIZE);

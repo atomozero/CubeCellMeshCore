@@ -25,18 +25,16 @@ uint32_t getPacketId(MCPacket* pkt);
 // Serial Command Handler
 //=============================================================================
 #ifndef SILENT
-char cmdBuffer[64];
+char cmdBuffer[48];  // Reduced from 64 to save RAM
 uint8_t cmdPos = 0;
 
 #if defined(MINIMAL_DEBUG) && defined(LITE_MODE)
 // Minimal command handler - essential commands only
 void processCommand(char* cmd) {
     if (strcmp(cmd, "?") == 0 || strcmp(cmd, "help") == 0) {
-        LOG_RAW("=== Commands ===\n\r");
-        LOG_RAW("status,stats,advert,nodes,contacts,neighbours,telemetry,identity\n\r");
-        LOG_RAW("advert interval [s],name [n],location [lat lon],time [ts]\n\r");
-        LOG_RAW("nodetype [chat|repeater],passwd,sleep,rxboost,newid,reset,save,reboot\n\r");
-        LOG_RAW("alert [on|off|dest <pubkey>|clear|test]\n\r");
+        LOG_RAW("Cmds:status stats advert nodes contacts neighbours telemetry identity\n\r"
+                "name[n] location[lat lon] time[ts] nodetype passwd sleep rxboost\n\r"
+                "alert[on|off|dest|clear|test] newid reset save reboot\n\r");
     }
     else if (strcmp(cmd, "status") == 0) {
         LOG_RAW("FW:%s Node:%s Hash:%02X\n\r", FIRMWARE_VERSION, nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
@@ -62,6 +60,7 @@ void processCommand(char* cmd) {
         nodeIdentity.reset();
         LOG_RAW("New: %s (hash:%02X) - reboot now\n\r", nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
     }
+    #ifdef ENABLE_CRYPTO_TESTS
     else if (strcmp(cmd, "test") == 0) {
         // RFC 8032 Test Vector 1: empty message - VERIFY test
         const uint8_t pubkey[] = {
@@ -84,14 +83,12 @@ void processCommand(char* cmd) {
         LOG_RAW("RFC8032 Verify (empty msg): %s\n\r", ok ? "PASS" : "FAIL");
 
         // RFC 8032 Test Vector 1: SIGN test
-        // Seed (secret key): 9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60
         const uint8_t seed[] = {
             0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60,
             0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
             0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19,
             0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60
         };
-        // Expected signature for empty message
         const uint8_t expected_sig[] = {
             0xe5, 0x56, 0x43, 0x00, 0xc3, 0x60, 0xac, 0x72,
             0x90, 0x86, 0xe2, 0xcc, 0x80, 0x6e, 0x82, 0x8a,
@@ -103,35 +100,20 @@ void processCommand(char* cmd) {
             0x65, 0x51, 0x41, 0x43, 0x8e, 0x7a, 0x10, 0x0b
         };
 
-        // Generate keypair from seed
         uint8_t test_pubkey[32];
         uint8_t test_privkey[64];
         ed25519_create_keypair(test_pubkey, test_privkey, seed);
 
-        // Check if public key matches expected
         bool pubkey_ok = (memcmp(test_pubkey, pubkey, 32) == 0);
         LOG_RAW("RFC8032 Keypair gen: %s\n\r", pubkey_ok ? "PASS" : "FAIL");
-        if (!pubkey_ok) {
-            LOG_RAW("  Expected: %02X%02X%02X%02X...\n\r", pubkey[0], pubkey[1], pubkey[2], pubkey[3]);
-            LOG_RAW("  Got:      %02X%02X%02X%02X...\n\r", test_pubkey[0], test_pubkey[1], test_pubkey[2], test_pubkey[3]);
-        }
 
-        // Sign empty message
         uint8_t test_sig[64];
         ed25519_sign(test_sig, NULL, 0, test_pubkey, test_privkey);
 
-        // Check if signature matches expected
         bool sign_ok = (memcmp(test_sig, expected_sig, 64) == 0);
         LOG_RAW("RFC8032 Sign (empty msg): %s\n\r", sign_ok ? "PASS" : "FAIL");
-        if (!sign_ok) {
-            LOG_RAW("  Expected: %02X%02X%02X%02X%02X%02X%02X%02X...\n\r",
-                    expected_sig[0], expected_sig[1], expected_sig[2], expected_sig[3],
-                    expected_sig[4], expected_sig[5], expected_sig[6], expected_sig[7]);
-            LOG_RAW("  Got:      %02X%02X%02X%02X%02X%02X%02X%02X...\n\r",
-                    test_sig[0], test_sig[1], test_sig[2], test_sig[3],
-                    test_sig[4], test_sig[5], test_sig[6], test_sig[7]);
-        }
     }
+    #endif // ENABLE_CRYPTO_TESTS
     else if (strcmp(cmd, "nodetype chat") == 0) {
         uint8_t flags = nodeIdentity.getFlags();
         flags = (flags & 0xF0) | MC_TYPE_CHAT_NODE;
@@ -2449,7 +2431,7 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
                 LOG(TAG_AUTH " CLI cmd: '%s'\n\r", cmdStr);
 
                 // Process command and get response
-                char cliResponse[128];
+                char cliResponse[96];  // Reduced from 128 to save stack
                 bool isAdmin = (session->permissions >= PERM_ACL_ADMIN);
                 uint16_t cliLen = processRemoteCommand(cmdStr, cliResponse, sizeof(cliResponse), isAdmin);
 
@@ -2604,6 +2586,17 @@ bool processAnonRequest(MCPacket* pkt) {
     // Extract components (dest_hash at [0] already verified by caller)
     const uint8_t* ephemeralPub = &pkt->payload[1];     // Ephemeral pubkey at [1-32]
 
+    // Debug: show ANON_REQ structure - trying different format interpretations
+    LOG(TAG_AUTH " ANON_REQ payload (%d bytes):\n\r", pkt->payloadLen);
+    LOG(TAG_AUTH "   [0] destHash: %02X\n\r", pkt->payload[0]);
+    LOG(TAG_AUTH "   [1] srcHash?: %02X (Andrea=7E)\n\r", pkt->payload[1]);
+    LOG(TAG_AUTH "   [2-9] ephemeral?: ");
+    for(int i=2; i<=9 && i<pkt->payloadLen; i++) LOG_RAW("%02X ", pkt->payload[i]);
+    LOG_RAW("\n\r");
+    LOG(TAG_AUTH "   Full payload hex: ");
+    for(int i=0; i<pkt->payloadLen && i<51; i++) LOG_RAW("%02X ", pkt->payload[i]);
+    LOG_RAW("\n\r");
+
     // Decrypt the request - pass from ephemeral pubkey onwards
     // decryptAnonReq expects: [ephemeral:32][MAC:2][ciphertext]
     uint32_t timestamp;
@@ -2739,16 +2732,18 @@ void processReceivedPacket(MCPacket* pkt) {
         // First ADVERT: sync immediately. Already synced: need 2 matching different times to re-sync
         uint32_t advertTime = AdvertGenerator::extractTimestamp(pkt->payload, pkt->payloadLen);
 
+        #ifdef DEBUG_VERBOSE
         // Debug: show raw timestamp bytes from received ADVERT
         Serial.printf("[RX-ADV] Raw ts bytes[32-35]: %02X %02X %02X %02X -> unix=%lu\n\r",
                       pkt->payload[32], pkt->payload[33], pkt->payload[34], pkt->payload[35], advertTime);
 
-        // Debug: show Andrea's appdata (starts at byte 100)
+        // Debug: show appdata (starts at byte 100)
         Serial.printf("[RX-ADV] Appdata[100+]: ");
         for (int i = 100; i < pkt->payloadLen && i < 116; i++) {
             Serial.printf("%02X ", pkt->payload[i]);
         }
         Serial.printf(" (len=%d)\n\r", pkt->payloadLen - 100);
+        #endif
 
         if (advertTime > 0) {
             uint8_t syncResult = timeSync.syncFromAdvert(advertTime);

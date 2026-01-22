@@ -98,13 +98,20 @@ public:
 
         // Try to load existing identity
         if (load()) {
+            Serial.printf("[ID] Loaded identity from EEPROM\n\r");
             initialized = true;
             return true;
         }
 
+        Serial.printf("[ID] No valid identity in EEPROM, generating new...\n\r");
+
         // Generate new identity
         if (generate()) {
-            save();
+            if (save()) {
+                Serial.printf("[ID] New identity saved to EEPROM\n\r");
+            } else {
+                Serial.printf("[ID] WARNING: Failed to save identity!\n\r");
+            }
             initialized = true;
             return true;
         }
@@ -118,6 +125,9 @@ public:
      */
     bool load() {
         EEPROM.get(IDENTITY_EEPROM_OFFSET, identity);
+
+        Serial.printf("[ID] EEPROM magic=%04X (expected %04X) version=%d (expected %d)\n\r",
+                      identity.magic, IDENTITY_MAGIC, identity.version, IDENTITY_VERSION);
 
         if (identity.magic == IDENTITY_MAGIC &&
             identity.version == IDENTITY_VERSION) {
