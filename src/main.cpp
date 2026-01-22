@@ -2540,19 +2540,16 @@ bool sendLoginResponse(const uint8_t* clientPubKey, const uint8_t* sharedSecret,
     MCPacket respPkt;
     respPkt.clear();
 
-    // Use DIRECT route for response (path already known)
-    respPkt.header.set(MC_ROUTE_DIRECT, MC_PAYLOAD_RESPONSE, MC_PAYLOAD_VER_1);
+    // Use FLOOD route for response (client may not have direct path)
+    // MeshCore always uses sendFlood for login responses
+    respPkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_RESPONSE, MC_PAYLOAD_VER_1);
+    respPkt.pathLen = 0;  // Flood has no path
 
-    // Copy return path (reversed)
-    respPkt.pathLen = outPathLen;
-    for (uint8_t i = 0; i < outPathLen; i++) {
-        respPkt.path[i] = outPath[outPathLen - 1 - i];
-    }
-
-    // Payload: [dest pubkey hash: 1][encrypted response]
+    // Payload: [dest_hash:1][src_hash:1][MAC:2][ciphertext]
     respPkt.payload[0] = clientPubKey[0];  // Destination hash
-    memcpy(&respPkt.payload[1], encryptedResponse, encLen);
-    respPkt.payloadLen = 1 + encLen;
+    respPkt.payload[1] = nodeIdentity.getNodeHash();  // Source hash (our hash)
+    memcpy(&respPkt.payload[2], encryptedResponse, encLen);
+    respPkt.payloadLen = 2 + encLen;
 
     // Send response
     LOG(TAG_AUTH " Sending LOGIN_OK response (path=%d, enc=%d bytes)\n\r",
