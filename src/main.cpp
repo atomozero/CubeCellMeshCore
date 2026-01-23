@@ -32,9 +32,9 @@ uint8_t cmdPos = 0;
 // Minimal command handler - essential commands only
 void processCommand(char* cmd) {
     if (strcmp(cmd, "?") == 0 || strcmp(cmd, "help") == 0) {
-        LOG_RAW("Cmds:status stats advert nodes contacts neighbours telemetry identity\n\r"
+        LOG_RAW("Cmds:status stats lifetime advert nodes contacts neighbours telemetry identity\n\r"
                 "name[n] location[lat lon] time[ts] nodetype passwd sleep rxboost\n\r"
-                "ratelimit[on|off|reset] alert[on|off|dest|clear|test] newid reset save reboot\n\r");
+                "ratelimit[on|off|reset] savestats alert[on|off|dest|clear|test] newid reset save reboot\n\r");
     }
     else if (strcmp(cmd, "status") == 0) {
         LOG_RAW("FW:%s Node:%s Hash:%02X\n\r", FIRMWARE_VERSION, nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
@@ -44,6 +44,20 @@ void processCommand(char* cmd) {
     else if (strcmp(cmd, "stats") == 0) {
         LOG_RAW("RX:%lu TX:%lu FWD:%lu ERR:%lu\n\r", rxCount, txCount, fwdCount, errCount);
         LOG_RAW("ADV TX:%lu RX:%lu Q:%d/%d\n\r", advTxCount, advRxCount, txQueue.getCount(), MC_TX_QUEUE_SIZE);
+    }
+    else if (strcmp(cmd, "lifetime") == 0) {
+        const PersistentStats* ps = getPersistentStats();
+        LOG_RAW("=== Lifetime Stats ===\n\r");
+        LOG_RAW("Boots: %d\n\r", ps->bootCount);
+        LOG_RAW("Uptime: %lu sec\n\r", statsGetTotalUptime());
+        LOG_RAW("RX: %lu TX: %lu FWD: %lu\n\r", ps->totalRxPackets, ps->totalTxPackets, ps->totalFwdPackets);
+        LOG_RAW("Unique nodes: %lu\n\r", ps->totalUniqueNodes);
+        LOG_RAW("Logins: %lu (failed: %lu)\n\r", ps->totalLogins, ps->totalLoginFails);
+        LOG_RAW("Rate limited: %lu\n\r", ps->totalRateLimited);
+    }
+    else if (strcmp(cmd, "savestats") == 0) {
+        savePersistentStats();
+        LOG_RAW("Stats saved to EEPROM\n\r");
     }
     else if (strcmp(cmd, "ratelimit") == 0) {
         LOG_RAW("RateLimit: %s\n\r", repeaterHelper.isRateLimitEnabled() ? "ON" : "OFF");
@@ -1577,6 +1591,7 @@ bool transmitPacket(MCPacket* pkt) {
     uint16_t irq = radio.getIrqStatus();
     if (irq & RADIOLIB_SX126X_IRQ_TX_DONE) {
         txCount++;
+        statsRecordTx();  // Persistent stats
         LOG(TAG_TX " Complete\n\r");
         ledOff();
         return true;
@@ -2593,10 +2608,12 @@ bool processAnonRequest(MCPacket* pkt) {
     memset(password, 0, sizeof(password));
 
     if (permissions == 0) {
+        statsRecordLoginFail();  // Persistent stats
         LOG(TAG_AUTH " Login FAILED\n\r");
         return false;
     }
 
+    statsRecordLogin();  // Persistent stats
     bool isAdmin = (permissions == PERM_ACL_ADMIN);
     LOG(TAG_AUTH " Login OK (%s)\n\r", isAdmin ? "admin" : "guest");
 
@@ -2634,6 +2651,7 @@ bool processAnonRequest(MCPacket* pkt) {
 
 void processReceivedPacket(MCPacket* pkt) {
     rxCount++;
+    statsRecordRx();  // Persistent stats
 
     // Update repeater statistics
     bool isFlood = pkt->header.isFlood();
@@ -2654,6 +2672,7 @@ void processReceivedPacket(MCPacket* pkt) {
         if (pkt->payloadLen >= 51 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
             // Rate limit login attempts
             if (!repeaterHelper.allowLogin()) {
+                statsRecordRateLimited();  // Persistent stats
                 LOG(TAG_AUTH " Login rate limited\n\r");
             } else {
                 processAnonRequest(pkt);
@@ -2665,6 +2684,7 @@ void processReceivedPacket(MCPacket* pkt) {
         if (pkt->payloadLen >= 20 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
             // Rate limit requests
             if (!repeaterHelper.allowRequest()) {
+                statsRecordRateLimited();  // Persistent stats
                 LOG(TAG_AUTH " Request rate limited\n\r");
             } else {
                 processAuthenticatedRequest(pkt);
@@ -2713,6 +2733,7 @@ void processReceivedPacket(MCPacket* pkt) {
                 // First sync - use immediately
                 ledBlueDoubleBlink();  // Signal time sync acquired
                 LOG(TAG_OK " " ANSI_GREEN "Time synchronized!" ANSI_RESET " Unix: %lu\n\r", timeSync.getTimestamp());
+                statsSetFirstBootTime(timeSync.getTimestamp());  // Persistent stats
                 // Schedule our own ADVERT after sync
                 pendingAdvertTime = millis() + ADVERT_AFTER_SYNC_MS;
                 LOG(TAG_INFO " Will send ADVERT in %d seconds\n\r", ADVERT_AFTER_SYNC_MS / 1000);
@@ -2748,6 +2769,7 @@ void processReceivedPacket(MCPacket* pkt) {
             // Update seen nodes with pubkey hash and name from ADVERT
             bool isNew = seenNodes.update(advInfo.pubKeyHash, pkt->rssi, pkt->snr, advInfo.name);
             if (isNew) {
+                statsRecordUniqueNode();  // Persistent stats
                 LOG(TAG_NODE " New node discovered via ADVERT\n\r");
                 // Send alert for new node
                 uint8_t nodeType = advInfo.isChatNode ? 1 : advInfo.isRepeater ? 2 : 0;
@@ -2775,6 +2797,7 @@ void processReceivedPacket(MCPacket* pkt) {
         // First byte is originator
         bool isNew = seenNodes.update(pkt->path[0], pkt->rssi, pkt->snr);
         if (isNew) {
+            statsRecordUniqueNode();  // Persistent stats
             LOG(TAG_NODE " New relay node detected: %02X\n\r", pkt->path[0]);
         }
         // If path has multiple hops, also track the last hop (direct neighbor)
@@ -2795,6 +2818,7 @@ void processReceivedPacket(MCPacket* pkt) {
         hash = (hash & 0x7F) | 0x80;
         bool isNew = seenNodes.update(hash, pkt->rssi, pkt->snr);
         if (isNew) {
+            statsRecordUniqueNode();  // Persistent stats
             LOG(TAG_NODE " New direct node detected: %02X\n\r", hash);
         }
     }
@@ -2803,6 +2827,7 @@ void processReceivedPacket(MCPacket* pkt) {
     if (shouldForward(pkt)) {
         // Rate limit forwarding
         if (!repeaterHelper.allowForward()) {
+            statsRecordRateLimited();  // Persistent stats
             LOG(TAG_FWD " Forward rate limited\n\r");
         } else {
             // Add our node hash to path (simplified: just add a byte)
@@ -2813,6 +2838,7 @@ void processReceivedPacket(MCPacket* pkt) {
             // Add to TX queue
             txQueue.add(pkt);
             fwdCount++;
+            statsRecordFwd();  // Persistent stats
             LOG(TAG_FWD " Queued for relay (path=%d)\n\r", pkt->pathLen);
         }
     }
@@ -2836,6 +2862,9 @@ void setup() {
 
     // Load configuration from EEPROM
     loadConfig();
+
+    // Load persistent statistics
+    loadPersistentStats();
 
     // Enable watchdog
 #if MC_WATCHDOG_ENABLED && defined(CUBECELL)
@@ -3000,6 +3029,9 @@ void loop() {
 
     // Check ADVERT beacon timer
     checkAdvertBeacon();
+
+    // Check if persistent stats need auto-save
+    checkStatsSave();
 
 #ifndef LITE_MODE
     // Check daily report scheduler

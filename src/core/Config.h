@@ -53,9 +53,67 @@ struct NodeConfig {
 extern const NodeConfig defaultConfig;
 
 //=============================================================================
+// Persistent Statistics defines
+//=============================================================================
+#ifndef STATS_EEPROM_OFFSET
+#define STATS_EEPROM_OFFSET     280
+#endif
+#ifndef STATS_EEPROM_MAGIC
+#define STATS_EEPROM_MAGIC      0x5754
+#endif
+#ifndef STATS_EEPROM_VERSION
+#define STATS_EEPROM_VERSION    1
+#endif
+#ifndef STATS_SAVE_INTERVAL_MS
+#define STATS_SAVE_INTERVAL_MS  300000
+#endif
+
+#ifndef PERSISTENTSTATS_DEFINED
+#define PERSISTENTSTATS_DEFINED
+struct PersistentStats {
+    uint16_t magic;
+    uint8_t version;
+    uint8_t reserved;
+    uint32_t totalRxPackets;
+    uint32_t totalTxPackets;
+    uint32_t totalFwdPackets;
+    uint32_t totalUniqueNodes;
+    uint32_t totalUptime;
+    uint32_t totalLogins;
+    uint32_t totalLoginFails;
+    uint32_t totalRateLimited;
+    uint16_t bootCount;
+    uint16_t lastBootReason;
+    uint32_t firstBootTime;
+    uint32_t lastSaveTime;
+    uint16_t checksum;
+};
+#endif
+
+//=============================================================================
 // Configuration Functions
 //=============================================================================
 
 void loadConfig();
 void saveConfig();
 void resetConfig();
+
+//=============================================================================
+// Persistent Statistics Functions
+//=============================================================================
+
+void loadPersistentStats();
+void savePersistentStats();
+void checkStatsSave();
+
+// Stat recording functions
+void statsRecordRx();
+void statsRecordTx();
+void statsRecordFwd();
+void statsRecordUniqueNode();
+void statsRecordLogin();
+void statsRecordLoginFail();
+void statsRecordRateLimited();
+void statsSetFirstBootTime(uint32_t unixTime);
+uint32_t statsGetTotalUptime();
+const PersistentStats* getPersistentStats();

@@ -149,3 +149,173 @@ void resetConfig() {
     saveConfig();
     CONFIG_LOG("[C] Reset to factory defaults\n\r");
 }
+
+//=============================================================================
+// Persistent Statistics (EEPROM)
+//=============================================================================
+
+// Global persistent stats instance
+PersistentStats persistentStats;
+static uint32_t lastStatsSaveTime = 0;
+static uint32_t sessionStartTime = 0;
+
+/**
+ * Simple CRC16 for data integrity
+ */
+static uint16_t calcCRC16(const uint8_t* data, size_t len) {
+    uint16_t crc = 0xFFFF;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++) {
+            if (crc & 1) crc = (crc >> 1) ^ 0xA001;
+            else crc >>= 1;
+        }
+    }
+    return crc;
+}
+
+/**
+ * Load persistent stats from EEPROM
+ */
+void loadPersistentStats() {
+    EEPROM.get(STATS_EEPROM_OFFSET, persistentStats);
+
+    // Verify magic, version and checksum
+    if (persistentStats.magic == STATS_EEPROM_MAGIC &&
+        persistentStats.version == STATS_EEPROM_VERSION) {
+        // Verify checksum
+        uint16_t savedCrc = persistentStats.checksum;
+        persistentStats.checksum = 0;
+        uint16_t calcCrc = calcCRC16((uint8_t*)&persistentStats, sizeof(PersistentStats));
+        persistentStats.checksum = savedCrc;
+
+        if (savedCrc == calcCrc) {
+            // Valid stats loaded
+            persistentStats.bootCount++;
+            CONFIG_LOG("[S] Stats loaded (boots=%d, rx=%lu, tx=%lu, nodes=%lu)\n\r",
+                persistentStats.bootCount,
+                persistentStats.totalRxPackets,
+                persistentStats.totalTxPackets,
+                persistentStats.totalUniqueNodes);
+            sessionStartTime = millis();
+            return;
+        }
+        CONFIG_LOG("[S] Stats checksum mismatch, resetting\n\r");
+    } else {
+        CONFIG_LOG("[S] No valid stats, initializing\n\r");
+    }
+
+    // Initialize fresh stats
+    memset(&persistentStats, 0, sizeof(PersistentStats));
+    persistentStats.magic = STATS_EEPROM_MAGIC;
+    persistentStats.version = STATS_EEPROM_VERSION;
+    persistentStats.bootCount = 1;
+    persistentStats.firstBootTime = 0;  // Will be set when time syncs
+    sessionStartTime = millis();
+    savePersistentStats();
+}
+
+/**
+ * Save persistent stats to EEPROM
+ */
+void savePersistentStats() {
+    // Update uptime before saving
+    uint32_t sessionUptime = (millis() - sessionStartTime) / 1000;
+    persistentStats.totalUptime += sessionUptime;
+    sessionStartTime = millis();  // Reset for next interval
+
+    // Calculate checksum
+    persistentStats.checksum = 0;
+    persistentStats.checksum = calcCRC16((uint8_t*)&persistentStats, sizeof(PersistentStats));
+
+    EEPROM.put(STATS_EEPROM_OFFSET, persistentStats);
+    if (EEPROM.commit()) {
+        lastStatsSaveTime = millis();
+        CONFIG_LOG("[S] Stats saved\n\r");
+    } else {
+        CONFIG_LOG("[E] Stats save failed\n\r");
+    }
+}
+
+/**
+ * Check if stats need auto-save
+ */
+void checkStatsSave() {
+    if ((millis() - lastStatsSaveTime) >= STATS_SAVE_INTERVAL_MS) {
+        savePersistentStats();
+    }
+}
+
+/**
+ * Increment RX counter
+ */
+void statsRecordRx() {
+    persistentStats.totalRxPackets++;
+}
+
+/**
+ * Increment TX counter
+ */
+void statsRecordTx() {
+    persistentStats.totalTxPackets++;
+}
+
+/**
+ * Increment FWD counter
+ */
+void statsRecordFwd() {
+    persistentStats.totalFwdPackets++;
+}
+
+/**
+ * Record unique node seen
+ */
+void statsRecordUniqueNode() {
+    persistentStats.totalUniqueNodes++;
+}
+
+/**
+ * Record successful login
+ */
+void statsRecordLogin() {
+    persistentStats.totalLogins++;
+}
+
+/**
+ * Record failed login
+ */
+void statsRecordLoginFail() {
+    persistentStats.totalLoginFails++;
+}
+
+/**
+ * Record rate limited request
+ */
+void statsRecordRateLimited() {
+    persistentStats.totalRateLimited++;
+}
+
+/**
+ * Set first boot time (called when time syncs)
+ */
+void statsSetFirstBootTime(uint32_t unixTime) {
+    if (persistentStats.firstBootTime == 0) {
+        persistentStats.firstBootTime = unixTime;
+    }
+    persistentStats.lastSaveTime = unixTime;
+}
+
+/**
+ * Get current uptime including session
+ */
+uint32_t statsGetTotalUptime() {
+    uint32_t sessionUptime = (millis() - sessionStartTime) / 1000;
+    return persistentStats.totalUptime + sessionUptime;
+}
+
+/**
+ * Get pointer to stats structure (read-only)
+ */
+const PersistentStats* getPersistentStats() {
+    return &persistentStats;
+}

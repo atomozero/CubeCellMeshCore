@@ -281,6 +281,38 @@ struct NodeConfig {
 extern const NodeConfig defaultConfig;
 
 //=============================================================================
+// Persistent Statistics (EEPROM)
+//=============================================================================
+#define STATS_EEPROM_OFFSET     280     // After Identity (~260 bytes)
+#define STATS_EEPROM_MAGIC      0x5754  // "ST" for stats
+#define STATS_EEPROM_VERSION    1
+#define STATS_SAVE_INTERVAL_MS  300000  // Auto-save every 5 minutes
+
+#ifndef PERSISTENTSTATS_DEFINED
+#define PERSISTENTSTATS_DEFINED
+struct PersistentStats {
+    uint16_t magic;             // Magic number to validate
+    uint8_t version;            // Stats version
+    uint8_t reserved;           // Padding
+    // Lifetime counters (never reset)
+    uint32_t totalRxPackets;    // Total packets received
+    uint32_t totalTxPackets;    // Total packets transmitted
+    uint32_t totalFwdPackets;   // Total packets forwarded
+    uint32_t totalUniqueNodes;  // Unique nodes ever seen
+    uint32_t totalUptime;       // Total uptime in seconds
+    uint32_t totalLogins;       // Total successful logins
+    uint32_t totalLoginFails;   // Total failed login attempts
+    uint32_t totalRateLimited;  // Total rate-limited requests
+    uint16_t bootCount;         // Number of boots
+    uint16_t lastBootReason;    // Last boot reason code
+    uint32_t firstBootTime;     // Unix timestamp of first boot
+    uint32_t lastSaveTime;      // Unix timestamp of last save
+    // Checksum for integrity
+    uint16_t checksum;          // CRC16 of data
+};
+#endif
+
+//=============================================================================
 // CubeCell specific
 //=============================================================================
 #ifdef CUBECELL
