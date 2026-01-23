@@ -2334,12 +2334,13 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
 
     switch (reqType) {
         case REQ_TYPE_GET_STATUS:
-            // Return core stats
+            // Return RepeaterStats in MeshCore format (52 bytes)
             LOG(TAG_AUTH " -> GET_STATUS\n\r");
-            responseLen += repeaterHelper.serializeCoreStats(
+            responseLen += repeaterHelper.serializeRepeaterStats(
                 &responseData[responseLen],
                 telemetry.getBatteryMv(),
-                txQueue.getCount());
+                txQueue.getCount(),
+                lastRssi, lastSnr);
             break;
 
         case REQ_TYPE_GET_TELEMETRY:
@@ -2471,17 +2472,9 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
     MCPacket respPkt;
     respPkt.clear();
 
-    // Use DIRECT route for response
-    respPkt.header.set(MC_ROUTE_DIRECT, MC_PAYLOAD_RESPONSE, MC_PAYLOAD_VER_1);
-
-    // Copy return path (may need to reverse depending on implementation)
-    respPkt.pathLen = session->outPathLen;
-    if (session->outPathLen > 0) {
-        // Reverse path for return
-        for (uint8_t i = 0; i < session->outPathLen; i++) {
-            respPkt.path[i] = session->outPath[session->outPathLen - 1 - i];
-        }
-    }
+    // Use FLOOD route for response (client may not have direct path)
+    respPkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_RESPONSE, MC_PAYLOAD_VER_1);
+    respPkt.pathLen = 0;
 
     // Payload: [dest_hash:1][src_hash:1][encrypted]
     respPkt.payload[0] = srcHash;                        // Destination (client)

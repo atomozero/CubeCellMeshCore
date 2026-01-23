@@ -613,7 +613,106 @@ public:
     }
 
     /**
-     * Serialize core stats for response
+     * Serialize RepeaterStats in MeshCore format (52 bytes)
+     * Matches MeshCore's RepeaterStats struct exactly
+     */
+    uint16_t serializeRepeaterStats(uint8_t* buf, uint16_t battMv, uint8_t queueLen,
+                                     int16_t rssi, int8_t snr) {
+        uint16_t pos = 0;
+        uint32_t uptimeSecs = millis() / 1000;
+
+        // batt_milli_volts (uint16_t)
+        buf[pos++] = battMv & 0xFF;
+        buf[pos++] = (battMv >> 8) & 0xFF;
+
+        // curr_tx_queue_len (uint16_t)
+        buf[pos++] = queueLen & 0xFF;
+        buf[pos++] = 0;
+
+        // noise_floor (int16_t)
+        buf[pos++] = radioStats.noiseFloor & 0xFF;
+        buf[pos++] = (radioStats.noiseFloor >> 8) & 0xFF;
+
+        // last_rssi (int16_t)
+        buf[pos++] = rssi & 0xFF;
+        buf[pos++] = (rssi >> 8) & 0xFF;
+
+        // n_packets_recv (uint32_t)
+        buf[pos++] = pktStats.numRecvPackets & 0xFF;
+        buf[pos++] = (pktStats.numRecvPackets >> 8) & 0xFF;
+        buf[pos++] = (pktStats.numRecvPackets >> 16) & 0xFF;
+        buf[pos++] = (pktStats.numRecvPackets >> 24) & 0xFF;
+
+        // n_packets_sent (uint32_t)
+        buf[pos++] = pktStats.numSentPackets & 0xFF;
+        buf[pos++] = (pktStats.numSentPackets >> 8) & 0xFF;
+        buf[pos++] = (pktStats.numSentPackets >> 16) & 0xFF;
+        buf[pos++] = (pktStats.numSentPackets >> 24) & 0xFF;
+
+        // total_air_time_secs (uint32_t)
+        buf[pos++] = radioStats.txAirTimeSec & 0xFF;
+        buf[pos++] = (radioStats.txAirTimeSec >> 8) & 0xFF;
+        buf[pos++] = (radioStats.txAirTimeSec >> 16) & 0xFF;
+        buf[pos++] = (radioStats.txAirTimeSec >> 24) & 0xFF;
+
+        // total_up_time_secs (uint32_t)
+        buf[pos++] = uptimeSecs & 0xFF;
+        buf[pos++] = (uptimeSecs >> 8) & 0xFF;
+        buf[pos++] = (uptimeSecs >> 16) & 0xFF;
+        buf[pos++] = (uptimeSecs >> 24) & 0xFF;
+
+        // n_sent_flood (uint32_t)
+        buf[pos++] = pktStats.numSentFlood & 0xFF;
+        buf[pos++] = (pktStats.numSentFlood >> 8) & 0xFF;
+        buf[pos++] = (pktStats.numSentFlood >> 16) & 0xFF;
+        buf[pos++] = (pktStats.numSentFlood >> 24) & 0xFF;
+
+        // n_sent_direct (uint32_t)
+        buf[pos++] = pktStats.numSentDirect & 0xFF;
+        buf[pos++] = (pktStats.numSentDirect >> 8) & 0xFF;
+        buf[pos++] = (pktStats.numSentDirect >> 16) & 0xFF;
+        buf[pos++] = (pktStats.numSentDirect >> 24) & 0xFF;
+
+        // n_recv_flood (uint32_t)
+        buf[pos++] = pktStats.numRecvFlood & 0xFF;
+        buf[pos++] = (pktStats.numRecvFlood >> 8) & 0xFF;
+        buf[pos++] = (pktStats.numRecvFlood >> 16) & 0xFF;
+        buf[pos++] = (pktStats.numRecvFlood >> 24) & 0xFF;
+
+        // n_recv_direct (uint32_t)
+        buf[pos++] = pktStats.numRecvDirect & 0xFF;
+        buf[pos++] = (pktStats.numRecvDirect >> 8) & 0xFF;
+        buf[pos++] = (pktStats.numRecvDirect >> 16) & 0xFF;
+        buf[pos++] = (pktStats.numRecvDirect >> 24) & 0xFF;
+
+        // err_events (uint16_t)
+        buf[pos++] = 0;
+        buf[pos++] = 0;
+
+        // last_snr (int16_t) - MeshCore uses SNR * 4
+        int16_t snr4 = snr * 4;
+        buf[pos++] = snr4 & 0xFF;
+        buf[pos++] = (snr4 >> 8) & 0xFF;
+
+        // n_direct_dups (uint16_t)
+        buf[pos++] = 0;
+        buf[pos++] = 0;
+
+        // n_flood_dups (uint16_t)
+        buf[pos++] = 0;
+        buf[pos++] = 0;
+
+        // total_rx_air_time_secs (uint32_t)
+        buf[pos++] = radioStats.rxAirTimeSec & 0xFF;
+        buf[pos++] = (radioStats.rxAirTimeSec >> 8) & 0xFF;
+        buf[pos++] = (radioStats.rxAirTimeSec >> 16) & 0xFF;
+        buf[pos++] = (radioStats.rxAirTimeSec >> 24) & 0xFF;
+
+        return pos;  // Should be 52
+    }
+
+    /**
+     * Serialize core stats for response (legacy format)
      */
     uint16_t serializeCoreStats(uint8_t* buf, uint16_t battMv, uint8_t queueLen) {
         CoreStats stats = getCoreStats(battMv, queueLen);
