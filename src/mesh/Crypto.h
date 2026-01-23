@@ -86,27 +86,7 @@ public:
      */
     static bool calcSharedSecret(uint8_t* secret, const uint8_t* myPrivateKey,
                                  const uint8_t* theirPublicKey) {
-        // Debug: show keys
-        Serial.printf("[KX] myPriv[0-7]: ");
-        for(int i=0; i<8; i++) Serial.printf("%02X ", myPrivateKey[i]);
-        Serial.printf("\n\r");
-        Serial.printf("[KX] theirPub (full 32):\n\r[KX]   ");
-        for(int i=0; i<16; i++) Serial.printf("%02X ", theirPublicKey[i]);
-        Serial.printf("\n\r[KX]   ");
-        for(int i=16; i<32; i++) Serial.printf("%02X ", theirPublicKey[i]);
-        Serial.printf("\n\r");
-
-        // Use ed25519_key_exchange (converts Ed25519 pubkey to X25519 internally)
-        // This is what MeshCore uses
         ed25519_key_exchange(secret, theirPublicKey, myPrivateKey);
-
-        Serial.printf("[KX] Ed25519 result (full 32 bytes):\n\r");
-        Serial.printf("[KX]   ");
-        for(int i=0; i<16; i++) Serial.printf("%02X ", secret[i]);
-        Serial.printf("\n\r[KX]   ");
-        for(int i=16; i<32; i++) Serial.printf("%02X ", secret[i]);
-        Serial.printf("\n\r");
-
         return true;
     }
 
@@ -157,12 +137,6 @@ public:
                            const uint8_t* data, uint16_t len) {
         uint8_t computed[MC_CIPHER_MAC_SIZE];
         computeHMAC(computed, key, data, len);
-
-        // Debug: show MAC comparison
-        Serial.printf("[MAC] received=%02X%02X computed=%02X%02X over %d bytes\n\r",
-                      mac[0], mac[1], computed[0], computed[1], len);
-
-        // Constant-time comparison
         uint8_t diff = 0;
         for (int i = 0; i < MC_CIPHER_MAC_SIZE; i++) {
             diff |= mac[i] ^ computed[i];
@@ -236,10 +210,6 @@ public:
             return 0;  // MAC verification failed
         }
 
-        // Set AES key (first 16 bytes of shared secret)
-        Serial.printf("[AES] Key[0-15]: ");
-        for(int i=0; i<16; i++) Serial.printf("%02X ", key[i]);
-        Serial.printf("\n\r");
         aes.setKey(key, MC_AES_KEY_SIZE);
 
         // Decrypt blocks (ECB mode - each block independently)
@@ -280,117 +250,41 @@ public:
     uint8_t decryptAnonReq(uint32_t* timestamp, char* password, uint8_t maxPwdLen,
                            const uint8_t* payload, uint16_t payloadLen,
                            const uint8_t* myPrivateKey) {
-        // Minimum: 32 (ephemeral pubkey) + 2 (MAC) + 15 (min encrypted - timestamp + short pwd)
-        // Note: 51-byte ANON_REQ with srcHash means: 51 - 2(hashes) = 49 bytes for ephemeral+MAC+cipher
-        Serial.printf("[CRYPTO] decryptAnonReq: payloadLen=%d\n\r", payloadLen);
         if (payloadLen < 32 + MC_CIPHER_MAC_SIZE + 15) {
-            Serial.printf("[CRYPTO] Payload too short: %d < %d\n\r", payloadLen, 32 + MC_CIPHER_MAC_SIZE + 15);
             return 0;
         }
 
-        // Extract ephemeral public key (first 32 bytes)
         const uint8_t* ephemeralPub = payload;
-        // Encrypted data starts after pubkey: [MAC:2][ciphertext]
         const uint8_t* encrypted = &payload[32];
         uint16_t encryptedLen = payloadLen - 32;
 
-        // Calculate shared secret with ephemeral key
         uint8_t secret[MC_SHARED_SECRET_SIZE];
         if (!calcSharedSecret(secret, myPrivateKey, ephemeralPub)) {
-            Serial.printf("[CRYPTO] calcSharedSecret failed\n\r");
             return 0;
         }
 
-        // Debug: show shared secret (first 8 bytes)
-        Serial.printf("[CRYPTO] SharedSecret[0-7]: ");
-        for(int i=0; i<8; i++) Serial.printf("%02X ", secret[i]);
-        Serial.printf("\n\r");
-
-        // Debug: show MAC and ciphertext
-        Serial.printf("[CRYPTO] encryptedLen=%d MAC=%02X%02X cipher[0-3]=%02X%02X%02X%02X\n\r",
-                      encryptedLen, encrypted[0], encrypted[1],
-                      encrypted[2], encrypted[3], encrypted[4], encrypted[5]);
-
-        // Decrypt (handles [MAC:2][ciphertext] format)
         uint8_t decrypted[128];
         uint16_t decryptedLen = MACThenDecrypt(decrypted, encrypted, encryptedLen,
                                                 secret, secret);
-
-        // Debug: show decryption result
-        Serial.printf("[CRYPTO] MACThenDecrypt returned %d bytes\n\r", decryptedLen);
-        if (decryptedLen > 0) {
-            Serial.printf("[CRYPTO] Decrypted ALL: ");
-            for(int i=0; i<decryptedLen; i++) Serial.printf("%02X ", decrypted[i]);
-            Serial.printf("\n\r");
-            // Try to show as ASCII
-            Serial.printf("[CRYPTO] As ASCII: '");
-            for(int i=0; i<decryptedLen; i++) {
-                char c = decrypted[i];
-                Serial.printf("%c", (c >= 32 && c < 127) ? c : '.');
-            }
-            Serial.printf("'\n\r");
-        }
-
-        // Clear secret immediately
         memset(secret, 0, MC_SHARED_SECRET_SIZE);
 
         if (decryptedLen == 0) {
-            return 0;  // Decryption failed (MAC mismatch)
+            return 0;
         }
 
         // Extract timestamp (little-endian)
-        *timestamp = decrypted[0] |
-                     (decrypted[1] << 8) |
-                     (decrypted[2] << 16) |
-                     (decrypted[3] << 24);
+        *timestamp = decrypted[0] | (decrypted[1] << 8) |
+                     (decrypted[2] << 16) | (decrypted[3] << 24);
 
-        Serial.printf("[CRYPTO] Extracted timestamp: %lu (0x%08lX)\n\r", *timestamp, *timestamp);
-        Serial.printf("[CRYPTO] Password bytes[4-11]: ");
-        for(int i=4; i<12 && i<decryptedLen; i++) Serial.printf("%02X ", decrypted[i]);
-        Serial.printf("\n\r");
-
-        // Extract password - try multiple MeshCore formats:
-        // Format A (Repeater): [timestamp:4][password:N]
-        // Format B (Room Server): [timestamp:4][sync_since:4][password:N]
+        // Extract password (offset 4 for Repeater format)
         uint8_t pwdLen = 0;
-
-        // Try offset 4 first (Repeater format)
         if (decrypted[4] >= 32 && decrypted[4] <= 126) {
             for (uint8_t i = 4; i < decryptedLen && pwdLen < maxPwdLen; i++) {
                 if (decrypted[i] < 32 || decrypted[i] > 126) break;
                 password[pwdLen++] = decrypted[i];
             }
-            Serial.printf("[CRYPTO] Format A (offset 4): '%s'\n\r", password);
-        }
-
-        // If offset 4 failed, try offset 8 (Room Server format with sync_since)
-        if (pwdLen == 0 && decryptedLen > 8) {
-            if (decrypted[8] >= 32 && decrypted[8] <= 126) {
-                for (uint8_t i = 8; i < decryptedLen && pwdLen < maxPwdLen; i++) {
-                    if (decrypted[i] < 32 || decrypted[i] > 126) break;
-                    password[pwdLen++] = decrypted[i];
-                }
-                Serial.printf("[CRYPTO] Format B (offset 8): '%s'\n\r", password);
-            }
-        }
-
-        // Last resort: find first alphabetic character
-        if (pwdLen == 0) {
-            for (uint8_t i = 4; i < decryptedLen; i++) {
-                if ((decrypted[i] >= 'a' && decrypted[i] <= 'z') ||
-                    (decrypted[i] >= 'A' && decrypted[i] <= 'Z')) {
-                    for (uint8_t j = i; j < decryptedLen && pwdLen < maxPwdLen; j++) {
-                        if (decrypted[j] < 32 || decrypted[j] > 126) break;
-                        password[pwdLen++] = decrypted[j];
-                    }
-                    Serial.printf("[CRYPTO] Fallback (offset %d): '%s'\n\r", i, password);
-                    break;
-                }
-            }
         }
         password[pwdLen] = '\0';
-
-        // Clear decrypted data
         memset(decrypted, 0, sizeof(decrypted));
 
         return pwdLen;
@@ -443,8 +337,8 @@ public:
         // Response code
         output[4] = RESP_SERVER_LOGIN_OK;
 
-        // Keep-alive interval (divided by 4 to fit in byte)
-        output[5] = keepAliveInterval / 4;
+        // Keep-alive interval (legacy, always 0 in MeshCore)
+        output[5] = 0;
 
         // Admin flag
         output[6] = isAdmin ? 1 : 0;

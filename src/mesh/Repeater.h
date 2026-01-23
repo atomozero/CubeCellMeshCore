@@ -14,12 +14,12 @@
 // Constants (Request/Control types now in Packet.h)
 //=============================================================================
 
-// ACL Permissions
+// ACL Permissions (MeshCore compatible)
 #define PERM_ACL_NONE               0x00
-#define PERM_ACL_GUEST              0x01  // Read-only stats
-#define PERM_ACL_READONLY           0x02  // Read-only access
+#define PERM_ACL_ADMIN              0x01  // Full admin access
+#define PERM_ACL_GUEST              0x02  // Read-only stats
+#define PERM_ACL_READONLY           0x02  // Alias for guest
 #define PERM_ACL_READWRITE          0x03  // Read-write access
-#define PERM_ACL_ADMIN              0x04  // Full admin access
 
 // Stats sub-types
 #define STATS_TYPE_CORE             0x00
@@ -1207,6 +1207,7 @@ public:
 #define LPP_RELATIVE_HUMIDITY   0x68  // 104 - 0.5% unsigned
 #define LPP_ACCELEROMETER       0x71  // 113
 #define LPP_BAROMETRIC_PRESSURE 0x73  // 115 - 0.1 hPa
+#define LPP_VOLTAGE             0x74  // 116 - 0.01V unsigned (MeshCore)
 #define LPP_GYROMETER           0x86  // 134
 #define LPP_GPS                 0x88  // 136 - lat/lon/alt
 
@@ -1228,7 +1229,23 @@ public:
     }
 
     /**
-     * Add analog input (used for battery voltage)
+     * Add voltage (MeshCore format, LPP type 116)
+     * @param channel Channel number (TELEM_CHANNEL_SELF = 1)
+     * @param voltage Voltage in volts (e.g., 4.12)
+     */
+    bool addVoltage(uint8_t channel, float voltage) {
+        if (cursor + 4 > maxSize) return false;
+
+        uint16_t val = (uint16_t)(voltage * 100);
+        buffer[cursor++] = channel;
+        buffer[cursor++] = LPP_VOLTAGE;
+        buffer[cursor++] = (val >> 8) & 0xFF;
+        buffer[cursor++] = val & 0xFF;
+        return true;
+    }
+
+    /**
+     * Add analog input (standard CayenneLPP)
      * @param channel Channel number
      * @param value Value * 100 (e.g., 4.12V = 412)
      */

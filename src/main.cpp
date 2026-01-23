@@ -2115,20 +2115,29 @@ uint32_t getPacketId(MCPacket* pkt) {
 bool shouldForward(MCPacket* pkt) {
     // Only forward flood packets
     if (!pkt->header.isFlood()) {
-        LOG(TAG_RX " Skipped (direct route, no forward)\n\r");
         return false;
+    }
+
+    // Don't forward packets specifically addressed to us
+    // ANON_REQ, REQUEST, RESPONSE all have dest_hash at payload[0]
+    uint8_t payloadType = pkt->header.getPayloadType();
+    if (payloadType == MC_PAYLOAD_ANON_REQ ||
+        payloadType == MC_PAYLOAD_REQUEST ||
+        payloadType == MC_PAYLOAD_RESPONSE) {
+        if (pkt->payloadLen > 0 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
+            // Addressed to us - don't forward
+            return false;
+        }
     }
 
     // Check packet ID cache
     uint32_t id = getPacketId(pkt);
     if (!packetCache.addIfNew(id)) {
-        LOG(TAG_RX " Skipped (duplicate ID=%08lX)\n\r", id);
         return false;
     }
 
     // Check path length (max 64 hops)
     if (pkt->pathLen >= MC_MAX_PATH_SIZE - 1) {
-        LOG(TAG_RX " Skipped (max hops reached)\n\r");
         return false;
     }
 
@@ -2282,7 +2291,8 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
     }
 
     if (!session) {
-        LOG(TAG_AUTH " REQUEST from unknown client %02X\n\r", srcHash);
+        LOG(TAG_AUTH " No session for %02X (have %d sessions)\n\r",
+            srcHash, sessionManager.getSessionCount());
         return false;
     }
 
@@ -2324,12 +2334,12 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
     uint8_t responseData[128];
     uint16_t responseLen = 0;
 
-    // All responses start with timestamp
-    uint32_t serverTime = timeSync.getTimestamp();
-    responseData[0] = serverTime & 0xFF;
-    responseData[1] = (serverTime >> 8) & 0xFF;
-    responseData[2] = (serverTime >> 16) & 0xFF;
-    responseData[3] = (serverTime >> 24) & 0xFF;
+    // All responses start with sender's timestamp (used as tag for matching)
+    // MeshCore reflects the request timestamp back, not server time
+    responseData[0] = timestamp & 0xFF;
+    responseData[1] = (timestamp >> 8) & 0xFF;
+    responseData[2] = (timestamp >> 16) & 0xFF;
+    responseData[3] = (timestamp >> 24) & 0xFF;
     responseLen = 4;
 
     switch (reqType) {
@@ -2344,11 +2354,16 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
             break;
 
         case REQ_TYPE_GET_TELEMETRY:
-            // Return telemetry in CayenneLPP format
+            // Return telemetry in MeshCore CayenneLPP format
             LOG(TAG_AUTH " -> GET_TELEMETRY\n\r");
             {
+                // Update battery reading before responding
+                telemetry.update();
+
                 CayenneLPP lpp(&responseData[responseLen], sizeof(responseData) - responseLen);
-                lpp.addAnalogInput(1, telemetry.getBatteryMv() / 1000.0f);
+                // Use LPP_VOLTAGE (116) for MeshCore compatibility
+                // Channel 1 = TELEM_CHANNEL_SELF
+                lpp.addVoltage(1, telemetry.getBatteryMv() / 1000.0f);
                 if (nodeIdentity.hasLocation()) {
                     float lat = nodeIdentity.getLatitude() / 1000000.0f;
                     float lon = nodeIdentity.getLongitude() / 1000000.0f;
@@ -2390,7 +2405,7 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
         case REQ_TYPE_GET_ACCESS_LIST:
             // Return ACL (admin only)
             LOG(TAG_AUTH " -> GET_ACCESS_LIST\n\r");
-            if (session->permissions < PERM_ACL_ADMIN) {
+            if (session->permissions != PERM_ACL_ADMIN) {
                 LOG(TAG_AUTH " Permission denied (not admin)\n\r");
                 return false;
             }
@@ -2410,7 +2425,7 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
         case REQ_TYPE_SEND_CLI:
             // Execute CLI command (admin only)
             LOG(TAG_AUTH " -> SEND_CLI\n\r");
-            if (session->permissions < PERM_ACL_ADMIN) {
+            if (session->permissions != PERM_ACL_ADMIN) {
                 LOG(TAG_AUTH " Permission denied (not admin)\n\r");
                 return false;
             }
@@ -2433,7 +2448,7 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
 
                 // Process command and get response
                 char cliResponse[96];  // Reduced from 128 to save stack
-                bool isAdmin = (session->permissions >= PERM_ACL_ADMIN);
+                bool isAdmin = (session->permissions == PERM_ACL_ADMIN);
                 uint16_t cliLen = processRemoteCommand(cmdStr, cliResponse, sizeof(cliResponse), isAdmin);
 
                 // Append CLI response to responseData (after timestamp)
@@ -2510,12 +2525,14 @@ bool sendLoginResponse(const uint8_t* clientPubKey, const uint8_t* sharedSecret,
                        const uint8_t* outPath, uint8_t outPathLen) {
     // Build response data
     uint8_t responseData[16];
+    // Use unique timestamp (current + 1 to ensure it's always newer)
+    uint32_t responseTs = timeSync.getTimestamp() + 1;
     uint8_t responseLen = MeshCrypto::buildLoginOKResponse(
         responseData,
-        timeSync.getTimestamp(),
+        responseTs,
         isAdmin,
         permissions,
-        60,  // Keep-alive interval: 60 seconds
+        60,  // Keep-alive interval (ignored)
         2    // Firmware version: 2.x
     );
 
@@ -2544,9 +2561,10 @@ bool sendLoginResponse(const uint8_t* clientPubKey, const uint8_t* sharedSecret,
     memcpy(&respPkt.payload[2], encryptedResponse, encLen);
     respPkt.payloadLen = 2 + encLen;
 
-    // Send response
-    LOG(TAG_AUTH " Sending LOGIN_OK response (path=%d, enc=%d bytes)\n\r",
-        respPkt.pathLen, encLen);
+    // Debug: show response payload
+    LOG(TAG_AUTH " RSP: d=%02X s=%02X MAC=%02X%02X enc=%d\n\r",
+        respPkt.payload[0], respPkt.payload[1],
+        respPkt.payload[2], respPkt.payload[3], encLen);
 
     // Queue for transmission
     txQueue.add(&respPkt);
@@ -2654,6 +2672,10 @@ bool processAnonRequest(MCPacket* pkt) {
         return false;
     }
 
+    // Debug: show session details
+    LOG(TAG_AUTH " Session: hash=%02X perm=%02X ts=%lu\n\r",
+        session->pubKey[0], session->permissions, session->lastTimestamp);
+
     // Send encrypted response
     return sendLoginResponse(
         ephemeralPub,
@@ -2704,11 +2726,20 @@ void processReceivedPacket(MCPacket* pkt) {
     // Handle REQUEST (authenticated request from logged-in client)
     // Format: [dest_hash:1][src_hash:1][MAC:2][ciphertext]
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_REQUEST) {
+        LOG(TAG_AUTH " REQUEST: len=%d dest=%02X src=%02X myHash=%02X\n\r",
+            pkt->payloadLen,
+            pkt->payloadLen > 0 ? pkt->payload[0] : 0,
+            pkt->payloadLen > 1 ? pkt->payload[1] : 0,
+            nodeIdentity.getNodeHash());
         if (pkt->payloadLen >= 20) {
             uint8_t destHash = pkt->payload[0];
             if (destHash == nodeIdentity.getNodeHash()) {
                 processAuthenticatedRequest(pkt);
+            } else {
+                LOG(TAG_AUTH " REQUEST not for us (dest=%02X)\n\r", destHash);
             }
+        } else {
+            LOG(TAG_AUTH " REQUEST too short\n\r");
         }
     }
     // Handle CONTROL (node discovery, etc.)
