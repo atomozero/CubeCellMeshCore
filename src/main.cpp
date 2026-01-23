@@ -2266,9 +2266,7 @@ bool processDiscoverRequest(MCPacket* pkt) {
  * @return true if request processed and response sent
  */
 bool processAuthenticatedRequest(MCPacket* pkt) {
-    // Minimum: dest_hash(1) + src_hash(1) + MAC(2) + min_cipher(16) = 20
     if (pkt->payloadLen < 20) {
-        LOG(TAG_AUTH " REQUEST too short: %d bytes\n\r", pkt->payloadLen);
         return false;
     }
 
@@ -2291,8 +2289,6 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
     }
 
     if (!session) {
-        LOG(TAG_AUTH " No session for %02X (have %d sessions)\n\r",
-            srcHash, sessionManager.getSessionCount());
         return false;
     }
 
@@ -2307,7 +2303,6 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
         session->sharedSecret, session->sharedSecret);
 
     if (decryptedLen == 0) {
-        LOG(TAG_AUTH " REQUEST decryption failed (bad MAC)\n\r");
         return false;
     }
 
@@ -2318,17 +2313,13 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
                          (decrypted[3] << 24);
 
     if (timestamp <= session->lastTimestamp) {
-        LOG(TAG_AUTH " REQUEST replay detected (ts=%lu <= %lu)\n\r",
-            timestamp, session->lastTimestamp);
-        return false;
+        return false;  // Replay attack
     }
     session->lastTimestamp = timestamp;
     session->lastActivity = millis();
 
     // Extract request type
     uint8_t reqType = decrypted[4];
-
-    LOG(TAG_AUTH " REQUEST type=0x%02X from %02X\n\r", reqType, srcHash);
 
     // Handle request based on type
     uint8_t responseData[128];
@@ -2344,8 +2335,6 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
 
     switch (reqType) {
         case REQ_TYPE_GET_STATUS:
-            // Return RepeaterStats in MeshCore format (52 bytes)
-            LOG(TAG_AUTH " -> GET_STATUS\n\r");
             responseLen += repeaterHelper.serializeRepeaterStats(
                 &responseData[responseLen],
                 telemetry.getBatteryMv(),
@@ -2354,19 +2343,14 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
             break;
 
         case REQ_TYPE_GET_TELEMETRY:
-            // Return node count as analog input
-            LOG(TAG_AUTH " -> GET_TELEMETRY\n\r");
             {
                 CayenneLPP lpp(&responseData[responseLen], sizeof(responseData) - responseLen);
-                // Channel 1: Number of seen nodes (as analog value)
                 lpp.addAnalogInput(1, (float)seenNodes.getCount());
                 responseLen += lpp.getSize();
             }
             break;
 
         case REQ_TYPE_GET_NEIGHBOURS:
-            // Return neighbour list
-            LOG(TAG_AUTH " -> GET_NEIGHBOURS\n\r");
             {
                 NeighbourTracker& neighbours = repeaterHelper.getNeighbours();
                 uint8_t count = neighbours.getCount();
@@ -2388,54 +2372,38 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
             break;
 
         case REQ_TYPE_GET_MINMAXAVG:
-            // Return radio stats
-            LOG(TAG_AUTH " -> GET_MINMAXAVG (radio stats)\n\r");
             responseLen += repeaterHelper.serializeRadioStats(&responseData[responseLen]);
             break;
 
         case REQ_TYPE_GET_ACCESS_LIST:
-            // Return ACL (admin only)
-            LOG(TAG_AUTH " -> GET_ACCESS_LIST\n\r");
             if (session->permissions != PERM_ACL_ADMIN) {
-                LOG(TAG_AUTH " Permission denied (not admin)\n\r");
                 return false;
             }
             {
                 ACLManager& acl = repeaterHelper.getACL();
                 uint8_t count = acl.getCount();
                 responseData[responseLen++] = count;
-                // Entries would follow but we keep it minimal
             }
             break;
 
         case REQ_TYPE_KEEP_ALIVE:
-            // Just acknowledge with timestamp
-            LOG(TAG_AUTH " -> KEEP_ALIVE\n\r");
             break;
 
         case REQ_TYPE_SEND_CLI:
-            // Execute CLI command (admin only)
-            LOG(TAG_AUTH " -> SEND_CLI\n\r");
             if (session->permissions != PERM_ACL_ADMIN) {
-                LOG(TAG_AUTH " Permission denied (not admin)\n\r");
                 return false;
             }
             {
-                // Extract command string from decrypted payload (after timestamp + type)
-                // Command starts at offset 5, null-terminated or until end of decrypted data
                 char cmdStr[64];
                 uint16_t cmdLen = decryptedLen - 5;
                 if (cmdLen > sizeof(cmdStr) - 1) cmdLen = sizeof(cmdStr) - 1;
                 memcpy(cmdStr, &decrypted[5], cmdLen);
                 cmdStr[cmdLen] = '\0';
 
-                // Remove trailing whitespace/newlines
                 while (cmdLen > 0 && (cmdStr[cmdLen-1] == '\n' || cmdStr[cmdLen-1] == '\r' ||
                        cmdStr[cmdLen-1] == ' ' || cmdStr[cmdLen-1] == '\0')) {
                     cmdStr[--cmdLen] = '\0';
                 }
-
-                LOG(TAG_AUTH " CLI cmd: '%s'\n\r", cmdStr);
 
                 // Process command and get response
                 char cliResponse[96];  // Reduced from 128 to save stack
@@ -2448,8 +2416,6 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
                     responseLen += cliLen;
                 }
 
-                LOG(TAG_AUTH " CLI response: %d bytes\n\r", cliLen);
-
                 // Handle reboot command specially
                 if (strcmp(cmdStr, "reboot") == 0) {
                     // Schedule reboot after sending response
@@ -2460,7 +2426,6 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
             break;
 
         default:
-            LOG(TAG_AUTH " Unknown request type 0x%02X\n\r", reqType);
             return false;
     }
 
@@ -2470,7 +2435,6 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
         encryptedResponse, responseData, responseLen, session->sharedSecret);
 
     if (encLen == 0) {
-        LOG(TAG_AUTH " Failed to encrypt response\n\r");
         return false;
     }
 
@@ -2487,8 +2451,6 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
     respPkt.payload[1] = nodeIdentity.getNodeHash();     // Source (us)
     memcpy(&respPkt.payload[2], encryptedResponse, encLen);
     respPkt.payloadLen = 2 + encLen;
-
-    LOG(TAG_AUTH " Sending RESPONSE (type=0x%02X, len=%d)\n\r", reqType, respPkt.payloadLen);
 
     // Queue for transmission
     txQueue.add(&respPkt);
@@ -2533,7 +2495,6 @@ bool sendLoginResponse(const uint8_t* clientPubKey, const uint8_t* sharedSecret,
         encryptedResponse, responseData, responseLen, sharedSecret);
 
     if (encLen == 0) {
-        LOG(TAG_AUTH " Failed to encrypt response\n\r");
         return false;
     }
 
@@ -2551,11 +2512,6 @@ bool sendLoginResponse(const uint8_t* clientPubKey, const uint8_t* sharedSecret,
     respPkt.payload[1] = nodeIdentity.getNodeHash();  // Source hash (our hash)
     memcpy(&respPkt.payload[2], encryptedResponse, encLen);
     respPkt.payloadLen = 2 + encLen;
-
-    // Debug: show response payload
-    LOG(TAG_AUTH " RSP: d=%02X s=%02X MAC=%02X%02X enc=%d\n\r",
-        respPkt.payload[0], respPkt.payload[1],
-        respPkt.payload[2], respPkt.payload[3], encLen);
 
     // Queue for transmission
     txQueue.add(&respPkt);
@@ -2585,17 +2541,6 @@ bool processAnonRequest(MCPacket* pkt) {
     // Extract components (dest_hash at [0] already verified by caller)
     const uint8_t* ephemeralPub = &pkt->payload[1];     // Ephemeral pubkey at [1-32]
 
-    // Debug: show ANON_REQ structure - trying different format interpretations
-    LOG(TAG_AUTH " ANON_REQ payload (%d bytes):\n\r", pkt->payloadLen);
-    LOG(TAG_AUTH "   [0] destHash: %02X\n\r", pkt->payload[0]);
-    LOG(TAG_AUTH "   [1] srcHash?: %02X (Andrea=7E)\n\r", pkt->payload[1]);
-    LOG(TAG_AUTH "   [2-9] ephemeral?: ");
-    for(int i=2; i<=9 && i<pkt->payloadLen; i++) LOG_RAW("%02X ", pkt->payload[i]);
-    LOG_RAW("\n\r");
-    LOG(TAG_AUTH "   Full payload hex: ");
-    for(int i=0; i<pkt->payloadLen && i<51; i++) LOG_RAW("%02X ", pkt->payload[i]);
-    LOG_RAW("\n\r");
-
     // Decrypt the request - pass from sender pubkey onwards
     // ANON_REQ format: [destHash:1][sender_pubkey:32][MAC:2][ciphertext]
     // decryptAnonReq expects: [sender_pubkey:32][MAC:2][ciphertext]
@@ -2612,11 +2557,8 @@ bool processAnonRequest(MCPacket* pkt) {
     );
 
     if (pwdLen == 0) {
-        LOG(TAG_AUTH " ANON_REQ decryption failed (bad MAC or format)\n\r");
         return false;
     }
-
-    LOG(TAG_AUTH " Login request: timestamp=%lu, password='%s'\n\r", timestamp, password);
 
     // Process login through session manager
     uint8_t permissions = sessionManager.processLogin(
@@ -2632,13 +2574,12 @@ bool processAnonRequest(MCPacket* pkt) {
     memset(password, 0, sizeof(password));
 
     if (permissions == 0) {
-        LOG(TAG_AUTH " Login " ANSI_RED "FAILED" ANSI_RESET " - invalid password or replay\n\r");
+        LOG(TAG_AUTH " Login FAILED\n\r");
         return false;
     }
 
     bool isAdmin = (permissions == PERM_ACL_ADMIN);
-    LOG(TAG_AUTH " Login " ANSI_GREEN "OK" ANSI_RESET " - %s access granted\n\r",
-        isAdmin ? "ADMIN" : "GUEST");
+    LOG(TAG_AUTH " Login OK (%s)\n\r", isAdmin ? "admin" : "guest");
 
     // Capture admin public key for daily report
     if (isAdmin) {
@@ -2652,20 +2593,14 @@ bool processAnonRequest(MCPacket* pkt) {
         if (isNewKey || keyEmpty) {
             memcpy(reportDestPubKey, ephemeralPub, REPORT_PUBKEY_SIZE);
             saveConfig();
-            LOG(TAG_AUTH " Admin pubkey captured for daily report\n\r");
         }
     }
 
     // Get shared secret from session for response encryption
     ClientSession* session = sessionManager.findSession(ephemeralPub);
     if (!session) {
-        LOG(TAG_AUTH " Session not found after login\n\r");
         return false;
     }
-
-    // Debug: show session details
-    LOG(TAG_AUTH " Session: hash=%02X perm=%02X ts=%lu\n\r",
-        session->pubKey[0], session->permissions, session->lastTimestamp);
 
     // Send encrypted response
     return sendLoginResponse(
@@ -2695,42 +2630,16 @@ void processReceivedPacket(MCPacket* pkt) {
         pkt->pathLen, pkt->payloadLen,
         pkt->rssi, pkt->snr / 4, abs(pkt->snr % 4) * 25);
 
-    // Handle ANON_REQ (login request) - must be addressed to us
-    // Format: [dest_hash:1][ephemeral_pub:32][MAC:2][ciphertext]
+    // Handle ANON_REQ (login request)
     if (pkt->header.getPayloadType() == MC_PAYLOAD_ANON_REQ) {
-        uint8_t destHash = pkt->payload[0];
-        LOG(TAG_AUTH " ANON_REQ: destHash=%02X myHash=%02X len=%d\n\r",
-            destHash, nodeIdentity.getNodeHash(), pkt->payloadLen);
-        // Min size: 1 (dest_hash) + 32 (ephemeral) + 2 (MAC) + 16 (min block)
-        if (pkt->payloadLen >= 51) {
-            // Check destination hash (first byte = dest_hash)
-            if (destHash == nodeIdentity.getNodeHash()) {
-                LOG(TAG_AUTH " Received ANON_REQ addressed to us (hash=%02X)\n\r", destHash);
-                processAnonRequest(pkt);
-            } else {
-                LOG(TAG_AUTH " ANON_REQ for other node (dest=%02X)\n\r", destHash);
-            }
-        } else {
-            LOG(TAG_AUTH " ANON_REQ too short: %d bytes (need 51+)\n\r", pkt->payloadLen);
+        if (pkt->payloadLen >= 51 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
+            processAnonRequest(pkt);
         }
     }
-    // Handle REQUEST (authenticated request from logged-in client)
-    // Format: [dest_hash:1][src_hash:1][MAC:2][ciphertext]
+    // Handle REQUEST (authenticated request)
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_REQUEST) {
-        LOG(TAG_AUTH " REQUEST: len=%d dest=%02X src=%02X myHash=%02X\n\r",
-            pkt->payloadLen,
-            pkt->payloadLen > 0 ? pkt->payload[0] : 0,
-            pkt->payloadLen > 1 ? pkt->payload[1] : 0,
-            nodeIdentity.getNodeHash());
-        if (pkt->payloadLen >= 20) {
-            uint8_t destHash = pkt->payload[0];
-            if (destHash == nodeIdentity.getNodeHash()) {
-                processAuthenticatedRequest(pkt);
-            } else {
-                LOG(TAG_AUTH " REQUEST not for us (dest=%02X)\n\r", destHash);
-            }
-        } else {
-            LOG(TAG_AUTH " REQUEST too short\n\r");
+        if (pkt->payloadLen >= 20 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
+            processAuthenticatedRequest(pkt);
         }
     }
     // Handle CONTROL (node discovery, etc.)
