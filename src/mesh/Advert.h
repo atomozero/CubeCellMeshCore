@@ -321,21 +321,8 @@ public:
         memcpy(&signData[signLen], appdata, appdataLen);
         signLen += appdataLen;
 
-        // Debug: print what we're signing
-        Serial.printf("[SIG] Signing %d bytes: pubkey(32)+ts(4)+appdata(%d)\n\r", signLen, appdataLen);
-        Serial.printf("[SIG] Appdata: ");
-        for (int i = 0; i < appdataLen && i < 16; i++) {
-            Serial.printf("%02X ", appdata[i]);
-        }
-        Serial.printf("...\n\r");
-
         // [36-99] Signature
         identity->sign(&payload[pos], signData, signLen);
-
-        // Self-verify signature to ensure correctness
-        bool sigOk = IdentityManager::verify(&payload[pos], identity->getPublicKey(), signData, signLen);
-        Serial.printf("[SIG] Self-verify: %s\n\r", sigOk ? "OK" : "FAIL");
-
         pos += MC_SIGNATURE_SIZE;
 
         // [100+] Appdata
@@ -343,22 +330,6 @@ public:
         pos += appdataLen;
 
         pkt->payloadLen = pos;
-
-        // Debug: print full packet structure
-        Serial.printf("[PKT] Header: %02X  PathLen: %d  PayloadLen: %d\n\r",
-                      pkt->header.raw, pkt->pathLen, pkt->payloadLen);
-        Serial.printf("[PKT] Payload hex dump:\n\r");
-        Serial.printf("  PubKey[0-7]: ");
-        for (int i = 0; i < 8; i++) Serial.printf("%02X ", payload[i]);
-        Serial.printf("\n\r");
-        Serial.printf("  Timestamp[32-35]: %02X %02X %02X %02X (unix=%lu)\n\r",
-                      payload[32], payload[33], payload[34], payload[35], timestamp);
-        Serial.printf("  Signature[36-43]: ");
-        for (int i = 36; i < 44; i++) Serial.printf("%02X ", payload[i]);
-        Serial.printf("...\n\r");
-        Serial.printf("  Appdata[100-%d]: ", 100 + appdataLen - 1);
-        for (int i = 100; i < 100 + appdataLen && i < 116; i++) Serial.printf("%02X ", payload[i]);
-        Serial.printf("\n\r");
 
         return true;
     }

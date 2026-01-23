@@ -1661,11 +1661,6 @@ void sendAdvertNoFlags() {
 
     // [36-99] Signature
     nodeIdentity.sign(&payload[pos], signData, signLen);
-
-    // Self-verify signature
-    bool sigOk = IdentityManager::verify(&payload[pos], nodeIdentity.getPublicKey(), signData, signLen);
-    LOG("[SIG] Self-verify: %s\n\r", sigOk ? "OK" : "FAIL");
-
     pos += MC_SIGNATURE_SIZE;
 
     // [100+] Appdata (just name, no flags)
