@@ -10,7 +10,8 @@ MeshCore-compatible repeater firmware for Heltec CubeCell HTCC-AB01.
 - **Packet Forwarding** - SNR-based CSMA/CA with weighted backoff
 - **Remote CLI** - Encrypted command access via mesh network
 - **Low Power** - Deep sleep support with duty-cycle RX
-- **Telemetry** - Battery voltage, temperature monitoring
+- **Telemetry** - Battery voltage, node statistics
+- **Neighbour Tracking** - Direct repeater discovery via 0-hop ADVERTs
 
 ## Hardware
 
@@ -58,9 +59,10 @@ status          - System status
 stats           - Packet statistics
 advert          - Send ADVERT now
 nodes           - List discovered nodes
+neighbours      - List direct repeater neighbours
 contacts        - List known contacts
 identity        - Show public key
-telemetry       - Battery, temperature
+telemetry       - Battery, node stats
 name <name>     - Set node name
 location <lat> <lon> - Set GPS coords
 save            - Save to EEPROM
@@ -191,6 +193,11 @@ MIT License - See LICENSE file for details.
 - [RadioLib](https://github.com/jgromes/RadioLib) - LoRa library
 
 ## Changelog
+
+### v0.3.1 (2026-01-23)
+- Added neighbour tracking for direct (0-hop) repeater ADVERTs
+- Fixed GET_NEIGHBOURS response format for MeshCore app compatibility
+- Neighbours now visible in MeshCore app "Manage > Neighbours" section
 
 ### v0.3.0 (2026-01-23)
 - Fixed MeshCore login protocol compatibility
