@@ -34,7 +34,7 @@ void processCommand(char* cmd) {
     if (strcmp(cmd, "?") == 0 || strcmp(cmd, "help") == 0) {
         LOG_RAW("Cmds:status stats advert nodes contacts neighbours telemetry identity\n\r"
                 "name[n] location[lat lon] time[ts] nodetype passwd sleep rxboost\n\r"
-                "alert[on|off|dest|clear|test] newid reset save reboot\n\r");
+                "ratelimit[on|off|reset] alert[on|off|dest|clear|test] newid reset save reboot\n\r");
     }
     else if (strcmp(cmd, "status") == 0) {
         LOG_RAW("FW:%s Node:%s Hash:%02X\n\r", FIRMWARE_VERSION, nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
@@ -44,6 +44,30 @@ void processCommand(char* cmd) {
     else if (strcmp(cmd, "stats") == 0) {
         LOG_RAW("RX:%lu TX:%lu FWD:%lu ERR:%lu\n\r", rxCount, txCount, fwdCount, errCount);
         LOG_RAW("ADV TX:%lu RX:%lu Q:%d/%d\n\r", advTxCount, advRxCount, txQueue.getCount(), MC_TX_QUEUE_SIZE);
+    }
+    else if (strcmp(cmd, "ratelimit") == 0) {
+        LOG_RAW("RateLimit: %s\n\r", repeaterHelper.isRateLimitEnabled() ? "ON" : "OFF");
+        LOG_RAW("Login: %lu blocked (max %d/%ds)\n\r",
+            repeaterHelper.getLoginLimiter().getTotalBlocked(),
+            RATE_LIMIT_LOGIN_MAX, RATE_LIMIT_LOGIN_SECS);
+        LOG_RAW("Request: %lu blocked (max %d/%ds)\n\r",
+            repeaterHelper.getRequestLimiter().getTotalBlocked(),
+            RATE_LIMIT_REQUEST_MAX, RATE_LIMIT_REQUEST_SECS);
+        LOG_RAW("Forward: %lu blocked (max %d/%ds)\n\r",
+            repeaterHelper.getForwardLimiter().getTotalBlocked(),
+            RATE_LIMIT_FORWARD_MAX, RATE_LIMIT_FORWARD_SECS);
+    }
+    else if (strncmp(cmd, "ratelimit ", 10) == 0) {
+        if (strcmp(cmd + 10, "on") == 0) {
+            repeaterHelper.setRateLimitEnabled(true);
+            LOG_RAW("RateLimit enabled\n\r");
+        } else if (strcmp(cmd + 10, "off") == 0) {
+            repeaterHelper.setRateLimitEnabled(false);
+            LOG_RAW("RateLimit disabled\n\r");
+        } else if (strcmp(cmd + 10, "reset") == 0) {
+            repeaterHelper.resetRateLimitStats();
+            LOG_RAW("RateLimit stats reset\n\r");
+        }
     }
     else if (strcmp(cmd, "advert") == 0) {
         sendAdvert(true);
@@ -2628,13 +2652,23 @@ void processReceivedPacket(MCPacket* pkt) {
     // Handle ANON_REQ (login request)
     if (pkt->header.getPayloadType() == MC_PAYLOAD_ANON_REQ) {
         if (pkt->payloadLen >= 51 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
-            processAnonRequest(pkt);
+            // Rate limit login attempts
+            if (!repeaterHelper.allowLogin()) {
+                LOG(TAG_AUTH " Login rate limited\n\r");
+            } else {
+                processAnonRequest(pkt);
+            }
         }
     }
     // Handle REQUEST (authenticated request)
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_REQUEST) {
         if (pkt->payloadLen >= 20 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
-            processAuthenticatedRequest(pkt);
+            // Rate limit requests
+            if (!repeaterHelper.allowRequest()) {
+                LOG(TAG_AUTH " Request rate limited\n\r");
+            } else {
+                processAuthenticatedRequest(pkt);
+            }
         }
     }
     // Handle CONTROL (node discovery, etc.)
@@ -2767,15 +2801,20 @@ void processReceivedPacket(MCPacket* pkt) {
 
     // Check if we should forward
     if (shouldForward(pkt)) {
-        // Add our node hash to path (simplified: just add a byte)
-        uint8_t myHash = (nodeId >> 24) ^ (nodeId >> 16) ^
-                         (nodeId >> 8) ^ nodeId;
-        pkt->path[pkt->pathLen++] = myHash;
+        // Rate limit forwarding
+        if (!repeaterHelper.allowForward()) {
+            LOG(TAG_FWD " Forward rate limited\n\r");
+        } else {
+            // Add our node hash to path (simplified: just add a byte)
+            uint8_t myHash = (nodeId >> 24) ^ (nodeId >> 16) ^
+                             (nodeId >> 8) ^ nodeId;
+            pkt->path[pkt->pathLen++] = myHash;
 
-        // Add to TX queue
-        txQueue.add(pkt);
-        fwdCount++;
-        LOG(TAG_FWD " Queued for relay (path=%d)\n\r", pkt->pathLen);
+            // Add to TX queue
+            txQueue.add(pkt);
+            fwdCount++;
+            LOG(TAG_FWD " Queued for relay (path=%d)\n\r", pkt->pathLen);
+        }
     }
 }
 

@@ -35,9 +35,116 @@
 #define MAX_DISCOVER_PER_WINDOW     4        // Max 4 responses per window
 #define DISCOVER_WINDOW_MS          120000   // 2 minute window
 
+// Rate limiting defaults
+#define RATE_LIMIT_LOGIN_MAX        5        // Max login attempts per window
+#define RATE_LIMIT_LOGIN_SECS       60       // Login window: 1 minute
+#define RATE_LIMIT_REQUEST_MAX      30       // Max requests per window
+#define RATE_LIMIT_REQUEST_SECS     60       // Request window: 1 minute
+#define RATE_LIMIT_FORWARD_MAX      100      // Max forwards per window
+#define RATE_LIMIT_FORWARD_SECS     60       // Forward window: 1 minute
+
 // Default passwords
 #define DEFAULT_ADMIN_PASSWORD      "password"
 #define DEFAULT_GUEST_PASSWORD      "hello"
+
+//=============================================================================
+// Rate Limiter Class
+//=============================================================================
+
+/**
+ * Generic rate limiter using sliding window
+ * Limits operations to a maximum count within a time window
+ */
+class RateLimiter {
+private:
+    uint32_t windowStart;   // Start of current window (seconds)
+    uint32_t windowSecs;    // Window duration in seconds
+    uint16_t maxCount;      // Max allowed in window
+    uint16_t count;         // Current count in window
+    uint32_t totalBlocked;  // Total blocked requests (stats)
+    uint32_t totalAllowed;  // Total allowed requests (stats)
+
+public:
+    RateLimiter(uint16_t maximum, uint32_t secs)
+        : windowStart(0), windowSecs(secs), maxCount(maximum), count(0),
+          totalBlocked(0), totalAllowed(0) {}
+
+    /**
+     * Check if operation is allowed
+     * @param nowSecs Current time in seconds (millis()/1000)
+     * @return true if allowed, false if rate limited
+     */
+    bool allow(uint32_t nowSecs) {
+        if (nowSecs < windowStart + windowSecs) {
+            // Still in current window
+            count++;
+            if (count > maxCount) {
+                totalBlocked++;
+                return false;  // Rate limited
+            }
+        } else {
+            // Window expired, start new one
+            windowStart = nowSecs;
+            count = 1;
+        }
+        totalAllowed++;
+        return true;
+    }
+
+    /**
+     * Check without incrementing counter (peek)
+     */
+    bool wouldAllow(uint32_t nowSecs) const {
+        if (nowSecs < windowStart + windowSecs) {
+            return (count < maxCount);
+        }
+        return true;  // New window would start
+    }
+
+    /**
+     * Get current count in window
+     */
+    uint16_t getCount() const { return count; }
+
+    /**
+     * Get max allowed
+     */
+    uint16_t getMax() const { return maxCount; }
+
+    /**
+     * Get window duration
+     */
+    uint32_t getWindowSecs() const { return windowSecs; }
+
+    /**
+     * Get total blocked count
+     */
+    uint32_t getTotalBlocked() const { return totalBlocked; }
+
+    /**
+     * Get total allowed count
+     */
+    uint32_t getTotalAllowed() const { return totalAllowed; }
+
+    /**
+     * Reset statistics
+     */
+    void resetStats() {
+        totalBlocked = 0;
+        totalAllowed = 0;
+    }
+
+    /**
+     * Reconfigure limits
+     */
+    void configure(uint16_t maximum, uint32_t secs) {
+        maxCount = maximum;
+        windowSecs = secs;
+        // Reset window on reconfigure
+        windowStart = 0;
+        count = 0;
+    }
+};
 
 //=============================================================================
 // Structures
@@ -499,6 +606,11 @@ private:
     ACLManager acl;
     DiscoverLimiter discoverLimiter;
 
+    // Rate limiters
+    RateLimiter loginLimiter;
+    RateLimiter requestLimiter;
+    RateLimiter forwardLimiter;
+
     // Statistics
     PacketStats pktStats;
     RadioStats radioStats;
@@ -507,9 +619,14 @@ private:
     // Configuration
     bool repeatEnabled;
     uint8_t maxFloodHops;
+    bool rateLimitEnabled;
 
 public:
-    RepeaterHelper() : identity(nullptr), startTime(0), repeatEnabled(true), maxFloodHops(8) {
+    RepeaterHelper() : identity(nullptr), startTime(0), repeatEnabled(true), maxFloodHops(8),
+                       rateLimitEnabled(true),
+                       loginLimiter(RATE_LIMIT_LOGIN_MAX, RATE_LIMIT_LOGIN_SECS),
+                       requestLimiter(RATE_LIMIT_REQUEST_MAX, RATE_LIMIT_REQUEST_SECS),
+                       forwardLimiter(RATE_LIMIT_FORWARD_MAX, RATE_LIMIT_FORWARD_SECS) {
         memset(&pktStats, 0, sizeof(pktStats));
         memset(&radioStats, 0, sizeof(radioStats));
     }
@@ -562,6 +679,85 @@ public:
      */
     void setMaxFloodHops(uint8_t hops) {
         maxFloodHops = hops;
+    }
+
+    //=========================================================================
+    // Rate Limiting
+    //=========================================================================
+
+    /**
+     * Check if rate limiting is enabled
+     */
+    bool isRateLimitEnabled() const {
+        return rateLimitEnabled;
+    }
+
+    /**
+     * Enable/disable rate limiting
+     */
+    void setRateLimitEnabled(bool en) {
+        rateLimitEnabled = en;
+    }
+
+    /**
+     * Check if login attempt is allowed
+     * @return true if allowed, false if rate limited
+     */
+    bool allowLogin() {
+        if (!rateLimitEnabled) return true;
+        return loginLimiter.allow(millis() / 1000);
+    }
+
+    /**
+     * Check if request is allowed
+     * @return true if allowed, false if rate limited
+     */
+    bool allowRequest() {
+        if (!rateLimitEnabled) return true;
+        return requestLimiter.allow(millis() / 1000);
+    }
+
+    /**
+     * Check if forward is allowed
+     * @return true if allowed, false if rate limited
+     */
+    bool allowForward() {
+        if (!rateLimitEnabled) return true;
+        return forwardLimiter.allow(millis() / 1000);
+    }
+
+    /**
+     * Get rate limiter stats
+     */
+    void getRateLimitStats(uint32_t* loginBlocked, uint32_t* requestBlocked,
+                           uint32_t* forwardBlocked) const {
+        if (loginBlocked) *loginBlocked = loginLimiter.getTotalBlocked();
+        if (requestBlocked) *requestBlocked = requestLimiter.getTotalBlocked();
+        if (forwardBlocked) *forwardBlocked = forwardLimiter.getTotalBlocked();
+    }
+
+    /**
+     * Get login limiter reference (for detailed stats)
+     */
+    const RateLimiter& getLoginLimiter() const { return loginLimiter; }
+
+    /**
+     * Get request limiter reference
+     */
+    const RateLimiter& getRequestLimiter() const { return requestLimiter; }
+
+    /**
+     * Get forward limiter reference
+     */
+    const RateLimiter& getForwardLimiter() const { return forwardLimiter; }
+
+    /**
+     * Reset all rate limiter stats
+     */
+    void resetRateLimitStats() {
+        loginLimiter.resetStats();
+        requestLimiter.resetStats();
+        forwardLimiter.resetStats();
     }
 
     /**
