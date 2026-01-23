@@ -2724,13 +2724,14 @@ void processReceivedPacket(MCPacket* pkt) {
             const uint8_t* pubKey = &pkt->payload[ADVERT_PUBKEY_OFFSET];
             contactMgr.updateFromAdvert(pubKey, advInfo.name, pkt->rssi, pkt->snr);
 
-            // If this is a repeater, add to neighbours list (full pubkey available)
-            if (advInfo.isRepeater && pkt->payloadLen >= 32) {
+            // If this is a repeater AND received directly (0-hop), add to neighbours list
+            // Only 0-hop ADVERTs indicate direct neighbours (no relay)
+            if (advInfo.isRepeater && pkt->pathLen == 0 && pkt->payloadLen >= 32) {
                 bool newNeighbour = repeaterHelper.getNeighbours().update(
                     pkt->payload,  // First 32 bytes are pubkey
                     pkt->snr, pkt->rssi);
                 if (newNeighbour) {
-                    LOG(TAG_NODE " New neighbour repeater added\n\r");
+                    LOG(TAG_NODE " New direct neighbour: %s (0-hop)\n\r", advInfo.name);
                 }
             }
         }

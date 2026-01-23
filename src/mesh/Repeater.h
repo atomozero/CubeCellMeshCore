@@ -224,7 +224,8 @@ public:
     }
 
     /**
-     * Serialize neighbors list for response
+     * Serialize neighbors list for response (MeshCore format)
+     * Format per entry: pubkey_prefix + seconds_since_heard (4 bytes) + snr (1 byte)
      * @param buf Output buffer
      * @param maxLen Maximum buffer size
      * @param offset Start from this neighbor index
@@ -235,19 +236,27 @@ public:
         if (prefixLen > 6) prefixLen = 6;
         uint16_t pos = 0;
         uint8_t cnt = 0;
+        uint32_t now = millis();
 
-        for (int i = 0; i < MAX_NEIGHBOURS && pos + prefixLen + 2 <= maxLen; i++) {
+        // Entry size: prefix + 4 bytes (seconds_since) + 1 byte (snr)
+        uint8_t entrySize = prefixLen + 5;
+
+        for (int i = 0; i < MAX_NEIGHBOURS && pos + entrySize <= maxLen; i++) {
             if (neighbours[i].valid) {
                 if (cnt >= offset) {
-                    // Write prefix
+                    // Write pubkey prefix
                     memcpy(&buf[pos], neighbours[i].pubKeyPrefix, prefixLen);
                     pos += prefixLen;
-                    // Write SNR
+
+                    // Write seconds since heard (4 bytes, little-endian)
+                    uint32_t secsSince = (now - neighbours[i].lastHeard) / 1000;
+                    buf[pos++] = secsSince & 0xFF;
+                    buf[pos++] = (secsSince >> 8) & 0xFF;
+                    buf[pos++] = (secsSince >> 16) & 0xFF;
+                    buf[pos++] = (secsSince >> 24) & 0xFF;
+
+                    // Write SNR (already stored as snr*4)
                     buf[pos++] = (uint8_t)neighbours[i].snr;
-                    // Write RSSI (as signed byte, clamped)
-                    int8_t rssiClamped = (neighbours[i].rssi < -128) ? -128 :
-                                         (neighbours[i].rssi > 127) ? 127 : (int8_t)neighbours[i].rssi;
-                    buf[pos++] = (uint8_t)rssiClamped;
                 }
                 cnt++;
             }
