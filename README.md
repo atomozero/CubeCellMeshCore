@@ -13,12 +13,13 @@ MeshCore-compatible repeater firmware for Heltec CubeCell HTCC-AB01.
 - **Telemetry** - Battery voltage, node statistics
 - **Neighbour Tracking** - Direct repeater discovery via 0-hop ADVERTs
 - **Rate Limiting** - Protection against flood/spam attacks
+- **Persistent Statistics** - Lifetime stats survive reboots (EEPROM)
 
 ## Hardware
 
 - **Board**: Heltec CubeCell HTCC-AB01
 - **Radio**: SX1262 LoRa transceiver
-- **Flash**: 131KB (94.8% used)
+- **Flash**: 131KB (95.8% used)
 - **RAM**: 16KB (49.4% used)
 
 ## Quick Start
@@ -194,6 +195,13 @@ MIT License - See LICENSE file for details.
 - [RadioLib](https://github.com/jgromes/RadioLib) - LoRa library
 
 ## Changelog
+
+### v0.3.3 (2026-01-23)
+- Added persistent statistics stored in EEPROM
+- Tracks lifetime: RX/TX/FWD packets, unique nodes, logins, uptime
+- Auto-save every 5 minutes with CRC16 integrity
+- New commands: `lifetime`, `savestats`
+- Boot counter for reliability monitoring
 
 ### v0.3.2 (2026-01-23)
 - Added rate limiting for login, request, and forwarding

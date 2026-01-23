@@ -1,4 +1,4 @@
-# CubeCellMeshCore v0.3.2 - Command Reference
+# CubeCellMeshCore v0.3.3 - Command Reference
 
 Serial console at 115200 baud.
 
@@ -9,6 +9,8 @@ Serial console at 115200 baud.
 | `help` | Show available commands |
 | `status` | Show system status (version, uptime, memory) |
 | `stats` | Show packet statistics (RX/TX/FWD counts) |
+| `lifetime` | Show lifetime statistics (persistent across reboots) |
+| `savestats` | Force save statistics to EEPROM |
 | `reboot` | Restart the device |
 | `factory` | Reset to factory defaults |
 
@@ -71,6 +73,23 @@ Serial console at 115200 baud.
 - **Request**: 30 requests per minute (spam protection)
 - **Forward**: 100 packets per minute (flood protection)
 
+## Statistics Commands
+
+| Command | Description |
+|---------|-------------|
+| `stats` | Show current session statistics |
+| `lifetime` | Show lifetime statistics (survives reboots) |
+| `savestats` | Force save statistics to EEPROM now |
+
+### Lifetime Statistics
+Statistics are automatically saved to EEPROM every 5 minutes and include:
+- Total RX/TX/FWD packets (lifetime)
+- Total unique nodes seen
+- Total logins (successful/failed)
+- Total rate-limited requests
+- Boot count
+- Total uptime (accumulated)
+
 ## Debug Commands
 
 | Command | Description |
@@ -90,17 +109,28 @@ Admin users have full access, guest users have read-only access.
 - `sleep`, `rxboost`
 
 ### Guest-allowed commands (remote)
-- `status`, `stats`, `telemetry`
+- `status`, `stats`, `lifetime`, `telemetry`
 - `nodes`, `contacts`, `radio`
 
 ## Output Format
 
 ### Status Output Example
 ```
-CubeCellMeshCore v0.3.0
+CubeCellMeshCore v0.3.3
 Uptime: 01:23:45
 Free RAM: 8192 bytes
 Radio: OK
+```
+
+### Lifetime Output Example
+```
+=== Lifetime Statistics ===
+Boots: 15
+Total uptime: 72h 15m
+Packets: RX=12345 TX=6789 FWD=4567
+Unique nodes: 23
+Logins: 45 ok, 3 fail
+Rate limited: 12
 ```
 
 ### Stats Output Example
