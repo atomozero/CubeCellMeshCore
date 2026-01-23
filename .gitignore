@@ -1,26 +1,29 @@
-# PlatformIO build files
+# PlatformIO
 .pio/
 .pioenvs/
 .piolibdeps/
-
-# IDE
 .vscode/
-.idea/
-*.swp
-*.swo
-*~
+.clang_complete
+.gcc-flags.json
 
-# Build outputs
+# Build files
+*.o
+*.a
 *.elf
 *.hex
 *.bin
 *.cyacd
 
-# OS files
+# IDE
+*.swp
+*.swo
+*~
+.idea/
+
+# OS
 .DS_Store
 Thumbs.db
 
-# Temporary files
-*.tmp
+# Backup files
+backup/
 *.bak
-*.log

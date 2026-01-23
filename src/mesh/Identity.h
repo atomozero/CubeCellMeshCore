@@ -1,24 +1,24 @@
 #pragma once
 #include <Arduino.h>
 #include <EEPROM.h>
-#include <Ed25519.h>
 #include <RNG.h>
-#include <SHA512.h>
+#include "ed25519_orlp.h"    // orlp/ed25519 for all Ed25519 operations (MeshCore compatible)
 
 /**
  * MeshCore Node Identity Management
  * Handles Ed25519 key generation, storage, and ADVERT signing
  *
- * Based on MeshCore protocol specification
+ * Uses orlp/ed25519 library with 64-byte private keys (SHA-512 expanded)
+ * This is fully compatible with MeshCore firmware
  */
 
 // EEPROM layout for identity (starts after NodeConfig)
-#define IDENTITY_EEPROM_OFFSET  32      // After NodeConfig
+#define IDENTITY_EEPROM_OFFSET  128     // After NodeConfig (~112 bytes)
 #define IDENTITY_MAGIC          0x4D43  // "MC" for MeshCore
-#define IDENTITY_VERSION        1
+#define IDENTITY_VERSION        2       // Version 2: 64-byte private key (orlp/ed25519)
 
-// Key sizes
-#define MC_PRIVATE_KEY_SIZE     32
+// Key sizes - MeshCore compatible
+#define MC_PRIVATE_KEY_SIZE     64      // orlp/ed25519 uses 64-byte expanded private key
 #define MC_PUBLIC_KEY_SIZE      32
 #define MC_SIGNATURE_SIZE       64
 #define MC_NODE_NAME_MAX        16
@@ -98,13 +98,20 @@ public:
 
         // Try to load existing identity
         if (load()) {
+            Serial.printf("[ID] Loaded identity from EEPROM\n\r");
             initialized = true;
             return true;
         }
 
+        Serial.printf("[ID] No valid identity in EEPROM, generating new...\n\r");
+
         // Generate new identity
         if (generate()) {
-            save();
+            if (save()) {
+                Serial.printf("[ID] New identity saved to EEPROM\n\r");
+            } else {
+                Serial.printf("[ID] WARNING: Failed to save identity!\n\r");
+            }
             initialized = true;
             return true;
         }
@@ -118,6 +125,9 @@ public:
      */
     bool load() {
         EEPROM.get(IDENTITY_EEPROM_OFFSET, identity);
+
+        Serial.printf("[ID] EEPROM magic=%04X (expected %04X) version=%d (expected %d)\n\r",
+                      identity.magic, IDENTITY_MAGIC, identity.version, IDENTITY_VERSION);
 
         if (identity.magic == IDENTITY_MAGIC &&
             identity.version == IDENTITY_VERSION) {
@@ -140,18 +150,20 @@ public:
     }
 
     /**
-     * Generate new Ed25519 keypair
+     * Generate new Ed25519 keypair using orlp/ed25519 (MeshCore compatible)
      * @return true if generation successful
      */
     bool generate() {
         // Wait for RNG to have enough entropy
         RNG.loop();
 
-        // Generate private key
-        Ed25519::generatePrivateKey(identity.privateKey);
+        // Generate 32-byte seed for keypair generation
+        uint8_t seed[32];
+        RNG.rand(seed, 32);
 
-        // Derive public key
-        Ed25519::derivePublicKey(identity.publicKey, identity.privateKey);
+        // Generate Ed25519 keypair using orlp/ed25519
+        // This creates a 64-byte private key (SHA-512 expanded) and 32-byte public key
+        ed25519_create_keypair(identity.publicKey, identity.privateKey, seed);
 
         // Set default name - use MC_DEFAULT_NAME if defined and not empty
         #ifdef MC_DEFAULT_NAME
@@ -237,6 +249,13 @@ public:
     }
 
     /**
+     * Set flags byte
+     */
+    void setFlags(uint8_t flags) {
+        identity.flags = flags;
+    }
+
+    /**
      * Set location
      * @param lat Latitude in degrees
      * @param lon Longitude in degrees
@@ -296,17 +315,17 @@ public:
     }
 
     /**
-     * Sign data with Ed25519
+     * Sign data with Ed25519 using orlp/ed25519 (MeshCore compatible)
      * @param signature Output buffer for 64-byte signature
      * @param data Data to sign
      * @param len Length of data
      */
     void sign(uint8_t* signature, const uint8_t* data, size_t len) {
-        Ed25519::sign(signature, identity.privateKey, identity.publicKey, data, len);
+        ed25519_sign(signature, data, len, identity.publicKey, identity.privateKey);
     }
 
     /**
-     * Verify Ed25519 signature
+     * Verify Ed25519 signature using orlp/ed25519 (MeshCore compatible)
      * @param signature 64-byte signature
      * @param publicKey 32-byte public key
      * @param data Signed data
@@ -315,7 +334,8 @@ public:
      */
     static bool verify(const uint8_t* signature, const uint8_t* publicKey,
                        const uint8_t* data, size_t len) {
-        return Ed25519::verify(signature, publicKey, data, len);
+        // Use orlp/ed25519 - same library as MeshCore
+        return ed25519_verify(signature, data, len, publicKey) == 1;
     }
 
     /**

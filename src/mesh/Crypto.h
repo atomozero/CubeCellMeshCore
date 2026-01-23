@@ -1,11 +1,10 @@
 #pragma once
 #include <Arduino.h>
-#include <Curve25519.h>
-#include <Ed25519.h>
 #include <AES.h>
 #include <SHA256.h>
 #include <RNG.h>
 #include "Identity.h"
+#include "ed25519_orlp.h"  // orlp/ed25519 for key exchange
 
 /**
  * MeshCore Encryption Module
@@ -38,69 +37,6 @@
 #define RESP_SERVER_LOGIN_FAIL  0x01
 
 /**
- * Converts Ed25519 public key to X25519 (Curve25519) format
- * Ed25519 uses twisted Edwards curve, X25519 uses Montgomery form
- *
- * The conversion involves: y = (1 + x) / (1 - x) in the field
- * For Ed25519 public keys, we extract the y-coordinate and convert
- */
-class KeyConverter {
-public:
-    /**
-     * Convert Ed25519 private key to X25519 private key
-     * Ed25519 private key is already suitable for X25519 after hashing
-     * @param x25519Priv Output X25519 private key (32 bytes)
-     * @param ed25519Priv Input Ed25519 private key (32 bytes)
-     */
-    static void ed25519PrivToX25519(uint8_t* x25519Priv, const uint8_t* ed25519Priv) {
-        // Ed25519 private keys are used directly in X25519
-        // The scalar is clamped the same way
-        memcpy(x25519Priv, ed25519Priv, 32);
-        // Clamp for X25519 (same as Ed25519 does internally)
-        x25519Priv[0] &= 0xF8;
-        x25519Priv[31] &= 0x7F;
-        x25519Priv[31] |= 0x40;
-    }
-
-    /**
-     * Convert Ed25519 public key to X25519 public key
-     * This is a mathematical conversion between curve representations
-     *
-     * For Ed25519 point (x, y), the X25519 u-coordinate is:
-     * u = (1 + y) / (1 - y)
-     *
-     * Ed25519 public key encodes y with sign bit of x in MSB
-     * @param x25519Pub Output X25519 public key (32 bytes)
-     * @param ed25519Pub Input Ed25519 public key (32 bytes)
-     * @return true if conversion successful
-     */
-    static bool ed25519PubToX25519(uint8_t* x25519Pub, const uint8_t* ed25519Pub) {
-        // The Ed25519 public key is the y-coordinate with x's sign in bit 255
-        // We need to compute u = (1 + y) / (1 - y) mod p
-        //
-        // For simplicity, we use the Crypto library's internal functions
-        // by computing the ECDH directly with eval()
-
-        // Actually, the standard way in MeshCore is to use the same key
-        // for both Ed25519 and X25519, which works because:
-        // - Ed25519::sign() uses the private key to derive scalars
-        // - Curve25519::eval() uses the private key as scalar
-        //
-        // MeshCore uses ed25519_key_exchange() which internally:
-        // 1. Hashes the Ed25519 private key
-        // 2. Uses result as X25519 scalar
-        // 3. Multiplies by the other party's public key (treated as X25519 point)
-        //
-        // For receiving ANON_REQ, we receive an ephemeral Ed25519 pubkey
-        // and compute ECDH using our Ed25519 private key
-
-        // Direct copy - let Curve25519::eval handle the math
-        memcpy(x25519Pub, ed25519Pub, 32);
-        return true;
-    }
-};
-
-/**
  * MeshCore Crypto Operations
  */
 class MeshCrypto {
@@ -108,8 +44,8 @@ private:
     uint8_t sharedSecret[MC_SHARED_SECRET_SIZE];
     bool hasSecret;
 
-    // AES-128 cipher instance
-    AESTiny128 aes;
+    // AES-128 cipher instance (use full AES128, not AESTiny128)
+    AES128 aes;
 
     /**
      * XOR a block with another
@@ -140,44 +76,18 @@ public:
     MeshCrypto() : hasSecret(false) {}
 
     /**
-     * Calculate ECDH shared secret using Curve25519
+     * Calculate ECDH shared secret using Ed25519 key exchange
+     * MeshCore uses ed25519_key_exchange which converts Ed25519→X25519 internally
+     *
      * @param secret Output shared secret (32 bytes)
-     * @param myPrivateKey Our Ed25519 private key
-     * @param theirPublicKey Their Ed25519/X25519 public key
+     * @param myPrivateKey Our Ed25519 private key (64-byte expanded key)
+     * @param theirPublicKey Their Ed25519 public key (32 bytes)
      * @return true if successful
      */
     static bool calcSharedSecret(uint8_t* secret, const uint8_t* myPrivateKey,
                                  const uint8_t* theirPublicKey) {
-        // MeshCore uses ed25519_key_exchange internally
-        // Curve25519::eval(result, scalar, point) computes result = scalar * point
-        //
-        // For Ed25519 keys, we need to:
-        // 1. Hash the private key to get scalar (like Ed25519 does)
-        // 2. Use their public key as the point
-
-        // Prepare X25519 scalar from Ed25519 private key
-        uint8_t scalar[32];
-        SHA512 hash;
-        uint8_t hashOut[64];
-
-        hash.reset();
-        hash.update(myPrivateKey, 32);
-        hash.finalize(hashOut, 64);
-
-        // Take first 32 bytes and clamp for X25519
-        memcpy(scalar, hashOut, 32);
-        scalar[0] &= 0xF8;
-        scalar[31] &= 0x7F;
-        scalar[31] |= 0x40;
-
-        // Compute ECDH: shared = scalar * theirPublicKey
-        bool result = Curve25519::eval(secret, scalar, theirPublicKey);
-
-        // Clear sensitive data
-        memset(scalar, 0, 32);
-        memset(hashOut, 0, 64);
-
-        return result;
+        ed25519_key_exchange(secret, theirPublicKey, myPrivateKey);
+        return true;
     }
 
     /**
@@ -227,8 +137,6 @@ public:
                            const uint8_t* data, uint16_t len) {
         uint8_t computed[MC_CIPHER_MAC_SIZE];
         computeHMAC(computed, key, data, len);
-
-        // Constant-time comparison
         uint8_t diff = 0;
         for (int i = 0; i < MC_CIPHER_MAC_SIZE; i++) {
             diff |= mac[i] ^ computed[i];
@@ -302,7 +210,6 @@ public:
             return 0;  // MAC verification failed
         }
 
-        // Set AES key
         aes.setKey(key, MC_AES_KEY_SIZE);
 
         // Decrypt blocks (ECB mode - each block independently)
@@ -343,50 +250,41 @@ public:
     uint8_t decryptAnonReq(uint32_t* timestamp, char* password, uint8_t maxPwdLen,
                            const uint8_t* payload, uint16_t payloadLen,
                            const uint8_t* myPrivateKey) {
-        // Minimum: 32 (ephemeral pubkey) + 2 (MAC) + 16 (min encrypted block)
-        if (payloadLen < 32 + MC_CIPHER_MAC_SIZE + MC_AES_BLOCK_SIZE) {
+        if (payloadLen < 32 + MC_CIPHER_MAC_SIZE + 15) {
             return 0;
         }
 
-        // Extract ephemeral public key (first 32 bytes)
         const uint8_t* ephemeralPub = payload;
-        // Encrypted data starts after pubkey: [MAC:2][ciphertext]
         const uint8_t* encrypted = &payload[32];
         uint16_t encryptedLen = payloadLen - 32;
 
-        // Calculate shared secret with ephemeral key
         uint8_t secret[MC_SHARED_SECRET_SIZE];
         if (!calcSharedSecret(secret, myPrivateKey, ephemeralPub)) {
             return 0;
         }
 
-        // Decrypt (handles [MAC:2][ciphertext] format)
         uint8_t decrypted[128];
         uint16_t decryptedLen = MACThenDecrypt(decrypted, encrypted, encryptedLen,
                                                 secret, secret);
-
-        // Clear secret immediately
         memset(secret, 0, MC_SHARED_SECRET_SIZE);
 
         if (decryptedLen == 0) {
-            return 0;  // Decryption failed (MAC mismatch)
+            return 0;
         }
 
         // Extract timestamp (little-endian)
-        *timestamp = decrypted[0] |
-                     (decrypted[1] << 8) |
-                     (decrypted[2] << 16) |
-                     (decrypted[3] << 24);
+        *timestamp = decrypted[0] | (decrypted[1] << 8) |
+                     (decrypted[2] << 16) | (decrypted[3] << 24);
 
-        // Extract password (remaining bytes, may include padding zeros)
+        // Extract password (offset 4 for Repeater format)
         uint8_t pwdLen = 0;
-        for (uint8_t i = ANON_REQ_TIMESTAMP_SIZE; i < decryptedLen && i < maxPwdLen + ANON_REQ_TIMESTAMP_SIZE; i++) {
-            if (decrypted[i] == 0) break;  // Null terminator or padding
-            password[pwdLen++] = decrypted[i];
+        if (decrypted[4] >= 32 && decrypted[4] <= 126) {
+            for (uint8_t i = 4; i < decryptedLen && pwdLen < maxPwdLen; i++) {
+                if (decrypted[i] < 32 || decrypted[i] > 126) break;
+                password[pwdLen++] = decrypted[i];
+            }
         }
         password[pwdLen] = '\0';
-
-        // Clear decrypted data
         memset(decrypted, 0, sizeof(decrypted));
 
         return pwdLen;
@@ -439,8 +337,8 @@ public:
         // Response code
         output[4] = RESP_SERVER_LOGIN_OK;
 
-        // Keep-alive interval (divided by 4 to fit in byte)
-        output[5] = keepAliveInterval / 4;
+        // Keep-alive interval (legacy, always 0 in MeshCore)
+        output[5] = 0;
 
         // Admin flag
         output[6] = isAdmin ? 1 : 0;

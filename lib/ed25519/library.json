@@ -1,0 +1,7 @@
+{
+    "name": "ed25519",
+    "version": "1.0.0",
+    "description": "orlp/ed25519 - Portable C implementation of Ed25519",
+    "frameworks": "*",
+    "platforms": "*"
+}

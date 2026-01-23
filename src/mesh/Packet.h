@@ -121,18 +121,22 @@ struct MCPacket {
     int16_t rssi;
 
     // Calculate total packet size for TX
+    // MeshCore format: [header 1B][pathLen 1B][path N B][payload M B]
+    // NOTE: payloadLen is NOT transmitted - it's derived from total length
     inline uint16_t getTotalSize() const {
-        return 1 + 1 + 1 + pathLen + payloadLen;  // header + pathLen + payloadLen + path + payload
+        return 1 + 1 + pathLen + payloadLen;  // header + pathLen_byte + path + payload
     }
 
     // Serialize packet to buffer for transmission
+    // MeshCore wire format: [header][pathLen][path...][payload...]
+    // IMPORTANT: payloadLen is NOT in the wire format - receiver calculates it
     uint16_t serialize(uint8_t* buf, uint16_t maxLen) const {
         if (getTotalSize() > maxLen) return 0;
 
         uint16_t pos = 0;
         buf[pos++] = header.raw;
         buf[pos++] = pathLen;
-        buf[pos++] = payloadLen;
+        // NOTE: payloadLen is NOT transmitted in MeshCore protocol
 
         if (pathLen > 0) {
             memcpy(&buf[pos], path, pathLen);
@@ -148,17 +152,17 @@ struct MCPacket {
     }
 
     // Deserialize packet from received buffer
+    // MeshCore wire format: [header][pathLen][path...][payload...]
+    // payloadLen is calculated from total length minus header/path
     bool deserialize(const uint8_t* buf, uint16_t len) {
-        if (len < 3) return false;  // Minimum: header + pathLen + payloadLen
+        if (len < 2) return false;  // Minimum: header + pathLen
 
         uint16_t pos = 0;
         header.raw = buf[pos++];
         pathLen = buf[pos++];
-        payloadLen = buf[pos++];
 
-        // Validate lengths
+        // Validate path length
         if (pathLen > MC_MAX_PATH_SIZE) return false;
-        if (payloadLen > MC_MAX_PAYLOAD_SIZE) return false;
 
         // Check if we have enough data for path
         if (pos + pathLen > len) return false;
@@ -168,13 +172,13 @@ struct MCPacket {
             pos += pathLen;
         }
 
-        // For payload, use actual available bytes if less than declared
-        // This handles packets where payloadLen may include MAC/padding
+        // Payload is everything remaining after path
+        // This is how MeshCore determines payload length
         uint16_t availablePayload = len - pos;
-        if (availablePayload < payloadLen) {
-            // Truncated payload - use what we have
-            payloadLen = availablePayload;
+        if (availablePayload > MC_MAX_PAYLOAD_SIZE) {
+            availablePayload = MC_MAX_PAYLOAD_SIZE;
         }
+        payloadLen = availablePayload;
 
         if (payloadLen > 0) {
             memcpy(payload, &buf[pos], payloadLen);

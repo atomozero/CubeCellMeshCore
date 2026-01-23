@@ -14,12 +14,12 @@
 // Constants (Request/Control types now in Packet.h)
 //=============================================================================
 
-// ACL Permissions
+// ACL Permissions (MeshCore compatible)
 #define PERM_ACL_NONE               0x00
-#define PERM_ACL_GUEST              0x01  // Read-only stats
-#define PERM_ACL_READONLY           0x02  // Read-only access
+#define PERM_ACL_ADMIN              0x01  // Full admin access
+#define PERM_ACL_GUEST              0x02  // Read-only stats
+#define PERM_ACL_READONLY           0x02  // Alias for guest
 #define PERM_ACL_READWRITE          0x03  // Read-write access
-#define PERM_ACL_ADMIN              0x04  // Full admin access
 
 // Stats sub-types
 #define STATS_TYPE_CORE             0x00
@@ -35,9 +35,116 @@
 #define MAX_DISCOVER_PER_WINDOW     4        // Max 4 responses per window
 #define DISCOVER_WINDOW_MS          120000   // 2 minute window
 
+// Rate limiting defaults
+#define RATE_LIMIT_LOGIN_MAX        5        // Max login attempts per window
+#define RATE_LIMIT_LOGIN_SECS       60       // Login window: 1 minute
+#define RATE_LIMIT_REQUEST_MAX      30       // Max requests per window
+#define RATE_LIMIT_REQUEST_SECS     60       // Request window: 1 minute
+#define RATE_LIMIT_FORWARD_MAX      100      // Max forwards per window
+#define RATE_LIMIT_FORWARD_SECS     60       // Forward window: 1 minute
+
 // Default passwords
 #define DEFAULT_ADMIN_PASSWORD      "password"
 #define DEFAULT_GUEST_PASSWORD      "hello"
+
+//=============================================================================
+// Rate Limiter Class
+//=============================================================================
+
+/**
+ * Generic rate limiter using sliding window
+ * Limits operations to a maximum count within a time window
+ */
+class RateLimiter {
+private:
+    uint32_t windowStart;   // Start of current window (seconds)
+    uint32_t windowSecs;    // Window duration in seconds
+    uint16_t maxCount;      // Max allowed in window
+    uint16_t count;         // Current count in window
+    uint32_t totalBlocked;  // Total blocked requests (stats)
+    uint32_t totalAllowed;  // Total allowed requests (stats)
+
+public:
+    RateLimiter(uint16_t maximum, uint32_t secs)
+        : windowStart(0), windowSecs(secs), maxCount(maximum), count(0),
+          totalBlocked(0), totalAllowed(0) {}
+
+    /**
+     * Check if operation is allowed
+     * @param nowSecs Current time in seconds (millis()/1000)
+     * @return true if allowed, false if rate limited
+     */
+    bool allow(uint32_t nowSecs) {
+        if (nowSecs < windowStart + windowSecs) {
+            // Still in current window
+            count++;
+            if (count > maxCount) {
+                totalBlocked++;
+                return false;  // Rate limited
+            }
+        } else {
+            // Window expired, start new one
+            windowStart = nowSecs;
+            count = 1;
+        }
+        totalAllowed++;
+        return true;
+    }
+
+    /**
+     * Check without incrementing counter (peek)
+     */
+    bool wouldAllow(uint32_t nowSecs) const {
+        if (nowSecs < windowStart + windowSecs) {
+            return (count < maxCount);
+        }
+        return true;  // New window would start
+    }
+
+    /**
+     * Get current count in window
+     */
+    uint16_t getCount() const { return count; }
+
+    /**
+     * Get max allowed
+     */
+    uint16_t getMax() const { return maxCount; }
+
+    /**
+     * Get window duration
+     */
+    uint32_t getWindowSecs() const { return windowSecs; }
+
+    /**
+     * Get total blocked count
+     */
+    uint32_t getTotalBlocked() const { return totalBlocked; }
+
+    /**
+     * Get total allowed count
+     */
+    uint32_t getTotalAllowed() const { return totalAllowed; }
+
+    /**
+     * Reset statistics
+     */
+    void resetStats() {
+        totalBlocked = 0;
+        totalAllowed = 0;
+    }
+
+    /**
+     * Reconfigure limits
+     */
+    void configure(uint16_t maximum, uint32_t secs) {
+        maxCount = maximum;
+        windowSecs = secs;
+        // Reset window on reconfigure
+        windowStart = 0;
+        count = 0;
+    }
+};
 
 //=============================================================================
 // Structures
@@ -224,7 +331,8 @@ public:
     }
 
     /**
-     * Serialize neighbors list for response
+     * Serialize neighbors list for response (MeshCore format)
+     * Format per entry: pubkey_prefix + seconds_since_heard (4 bytes) + snr (1 byte)
      * @param buf Output buffer
      * @param maxLen Maximum buffer size
      * @param offset Start from this neighbor index
@@ -235,19 +343,27 @@ public:
         if (prefixLen > 6) prefixLen = 6;
         uint16_t pos = 0;
         uint8_t cnt = 0;
+        uint32_t now = millis();
 
-        for (int i = 0; i < MAX_NEIGHBOURS && pos + prefixLen + 2 <= maxLen; i++) {
+        // Entry size: prefix + 4 bytes (seconds_since) + 1 byte (snr)
+        uint8_t entrySize = prefixLen + 5;
+
+        for (int i = 0; i < MAX_NEIGHBOURS && pos + entrySize <= maxLen; i++) {
             if (neighbours[i].valid) {
                 if (cnt >= offset) {
-                    // Write prefix
+                    // Write pubkey prefix
                     memcpy(&buf[pos], neighbours[i].pubKeyPrefix, prefixLen);
                     pos += prefixLen;
-                    // Write SNR
+
+                    // Write seconds since heard (4 bytes, little-endian)
+                    uint32_t secsSince = (now - neighbours[i].lastHeard) / 1000;
+                    buf[pos++] = secsSince & 0xFF;
+                    buf[pos++] = (secsSince >> 8) & 0xFF;
+                    buf[pos++] = (secsSince >> 16) & 0xFF;
+                    buf[pos++] = (secsSince >> 24) & 0xFF;
+
+                    // Write SNR (already stored as snr*4)
                     buf[pos++] = (uint8_t)neighbours[i].snr;
-                    // Write RSSI (as signed byte, clamped)
-                    int8_t rssiClamped = (neighbours[i].rssi < -128) ? -128 :
-                                         (neighbours[i].rssi > 127) ? 127 : (int8_t)neighbours[i].rssi;
-                    buf[pos++] = (uint8_t)rssiClamped;
                 }
                 cnt++;
             }
@@ -490,6 +606,11 @@ private:
     ACLManager acl;
     DiscoverLimiter discoverLimiter;
 
+    // Rate limiters
+    RateLimiter loginLimiter;
+    RateLimiter requestLimiter;
+    RateLimiter forwardLimiter;
+
     // Statistics
     PacketStats pktStats;
     RadioStats radioStats;
@@ -498,9 +619,14 @@ private:
     // Configuration
     bool repeatEnabled;
     uint8_t maxFloodHops;
+    bool rateLimitEnabled;
 
 public:
-    RepeaterHelper() : identity(nullptr), startTime(0), repeatEnabled(true), maxFloodHops(8) {
+    RepeaterHelper() : identity(nullptr), startTime(0), repeatEnabled(true), maxFloodHops(8),
+                       rateLimitEnabled(true),
+                       loginLimiter(RATE_LIMIT_LOGIN_MAX, RATE_LIMIT_LOGIN_SECS),
+                       requestLimiter(RATE_LIMIT_REQUEST_MAX, RATE_LIMIT_REQUEST_SECS),
+                       forwardLimiter(RATE_LIMIT_FORWARD_MAX, RATE_LIMIT_FORWARD_SECS) {
         memset(&pktStats, 0, sizeof(pktStats));
         memset(&radioStats, 0, sizeof(radioStats));
     }
@@ -553,6 +679,85 @@ public:
      */
     void setMaxFloodHops(uint8_t hops) {
         maxFloodHops = hops;
+    }
+
+    //=========================================================================
+    // Rate Limiting
+    //=========================================================================
+
+    /**
+     * Check if rate limiting is enabled
+     */
+    bool isRateLimitEnabled() const {
+        return rateLimitEnabled;
+    }
+
+    /**
+     * Enable/disable rate limiting
+     */
+    void setRateLimitEnabled(bool en) {
+        rateLimitEnabled = en;
+    }
+
+    /**
+     * Check if login attempt is allowed
+     * @return true if allowed, false if rate limited
+     */
+    bool allowLogin() {
+        if (!rateLimitEnabled) return true;
+        return loginLimiter.allow(millis() / 1000);
+    }
+
+    /**
+     * Check if request is allowed
+     * @return true if allowed, false if rate limited
+     */
+    bool allowRequest() {
+        if (!rateLimitEnabled) return true;
+        return requestLimiter.allow(millis() / 1000);
+    }
+
+    /**
+     * Check if forward is allowed
+     * @return true if allowed, false if rate limited
+     */
+    bool allowForward() {
+        if (!rateLimitEnabled) return true;
+        return forwardLimiter.allow(millis() / 1000);
+    }
+
+    /**
+     * Get rate limiter stats
+     */
+    void getRateLimitStats(uint32_t* loginBlocked, uint32_t* requestBlocked,
+                           uint32_t* forwardBlocked) const {
+        if (loginBlocked) *loginBlocked = loginLimiter.getTotalBlocked();
+        if (requestBlocked) *requestBlocked = requestLimiter.getTotalBlocked();
+        if (forwardBlocked) *forwardBlocked = forwardLimiter.getTotalBlocked();
+    }
+
+    /**
+     * Get login limiter reference (for detailed stats)
+     */
+    const RateLimiter& getLoginLimiter() const { return loginLimiter; }
+
+    /**
+     * Get request limiter reference
+     */
+    const RateLimiter& getRequestLimiter() const { return requestLimiter; }
+
+    /**
+     * Get forward limiter reference
+     */
+    const RateLimiter& getForwardLimiter() const { return forwardLimiter; }
+
+    /**
+     * Reset all rate limiter stats
+     */
+    void resetRateLimitStats() {
+        loginLimiter.resetStats();
+        requestLimiter.resetStats();
+        forwardLimiter.resetStats();
     }
 
     /**
@@ -613,7 +818,106 @@ public:
     }
 
     /**
-     * Serialize core stats for response
+     * Serialize RepeaterStats in MeshCore format (52 bytes)
+     * Matches MeshCore's RepeaterStats struct exactly
+     */
+    uint16_t serializeRepeaterStats(uint8_t* buf, uint16_t battMv, uint8_t queueLen,
+                                     int16_t rssi, int8_t snr) {
+        uint16_t pos = 0;
+        uint32_t uptimeSecs = millis() / 1000;
+
+        // batt_milli_volts (uint16_t)
+        buf[pos++] = battMv & 0xFF;
+        buf[pos++] = (battMv >> 8) & 0xFF;
+
+        // curr_tx_queue_len (uint16_t)
+        buf[pos++] = queueLen & 0xFF;
+        buf[pos++] = 0;
+
+        // noise_floor (int16_t)
+        buf[pos++] = radioStats.noiseFloor & 0xFF;
+        buf[pos++] = (radioStats.noiseFloor >> 8) & 0xFF;
+
+        // last_rssi (int16_t)
+        buf[pos++] = rssi & 0xFF;
+        buf[pos++] = (rssi >> 8) & 0xFF;
+
+        // n_packets_recv (uint32_t)
+        buf[pos++] = pktStats.numRecvPackets & 0xFF;
+        buf[pos++] = (pktStats.numRecvPackets >> 8) & 0xFF;
+        buf[pos++] = (pktStats.numRecvPackets >> 16) & 0xFF;
+        buf[pos++] = (pktStats.numRecvPackets >> 24) & 0xFF;
+
+        // n_packets_sent (uint32_t)
+        buf[pos++] = pktStats.numSentPackets & 0xFF;
+        buf[pos++] = (pktStats.numSentPackets >> 8) & 0xFF;
+        buf[pos++] = (pktStats.numSentPackets >> 16) & 0xFF;
+        buf[pos++] = (pktStats.numSentPackets >> 24) & 0xFF;
+
+        // total_air_time_secs (uint32_t)
+        buf[pos++] = radioStats.txAirTimeSec & 0xFF;
+        buf[pos++] = (radioStats.txAirTimeSec >> 8) & 0xFF;
+        buf[pos++] = (radioStats.txAirTimeSec >> 16) & 0xFF;
+        buf[pos++] = (radioStats.txAirTimeSec >> 24) & 0xFF;
+
+        // total_up_time_secs (uint32_t)
+        buf[pos++] = uptimeSecs & 0xFF;
+        buf[pos++] = (uptimeSecs >> 8) & 0xFF;
+        buf[pos++] = (uptimeSecs >> 16) & 0xFF;
+        buf[pos++] = (uptimeSecs >> 24) & 0xFF;
+
+        // n_sent_flood (uint32_t)
+        buf[pos++] = pktStats.numSentFlood & 0xFF;
+        buf[pos++] = (pktStats.numSentFlood >> 8) & 0xFF;
+        buf[pos++] = (pktStats.numSentFlood >> 16) & 0xFF;
+        buf[pos++] = (pktStats.numSentFlood >> 24) & 0xFF;
+
+        // n_sent_direct (uint32_t)
+        buf[pos++] = pktStats.numSentDirect & 0xFF;
+        buf[pos++] = (pktStats.numSentDirect >> 8) & 0xFF;
+        buf[pos++] = (pktStats.numSentDirect >> 16) & 0xFF;
+        buf[pos++] = (pktStats.numSentDirect >> 24) & 0xFF;
+
+        // n_recv_flood (uint32_t)
+        buf[pos++] = pktStats.numRecvFlood & 0xFF;
+        buf[pos++] = (pktStats.numRecvFlood >> 8) & 0xFF;
+        buf[pos++] = (pktStats.numRecvFlood >> 16) & 0xFF;
+        buf[pos++] = (pktStats.numRecvFlood >> 24) & 0xFF;
+
+        // n_recv_direct (uint32_t)
+        buf[pos++] = pktStats.numRecvDirect & 0xFF;
+        buf[pos++] = (pktStats.numRecvDirect >> 8) & 0xFF;
+        buf[pos++] = (pktStats.numRecvDirect >> 16) & 0xFF;
+        buf[pos++] = (pktStats.numRecvDirect >> 24) & 0xFF;
+
+        // err_events (uint16_t)
+        buf[pos++] = 0;
+        buf[pos++] = 0;
+
+        // last_snr (int16_t) - MeshCore uses SNR * 4
+        int16_t snr4 = snr * 4;
+        buf[pos++] = snr4 & 0xFF;
+        buf[pos++] = (snr4 >> 8) & 0xFF;
+
+        // n_direct_dups (uint16_t)
+        buf[pos++] = 0;
+        buf[pos++] = 0;
+
+        // n_flood_dups (uint16_t)
+        buf[pos++] = 0;
+        buf[pos++] = 0;
+
+        // total_rx_air_time_secs (uint32_t)
+        buf[pos++] = radioStats.rxAirTimeSec & 0xFF;
+        buf[pos++] = (radioStats.rxAirTimeSec >> 8) & 0xFF;
+        buf[pos++] = (radioStats.rxAirTimeSec >> 16) & 0xFF;
+        buf[pos++] = (radioStats.rxAirTimeSec >> 24) & 0xFF;
+
+        return pos;  // Should be 52
+    }
+
+    /**
+     * Serialize core stats for response (legacy format)
      */
     uint16_t serializeCoreStats(uint8_t* buf, uint16_t battMv, uint8_t queueLen) {
         CoreStats stats = getCoreStats(battMv, queueLen);
@@ -1108,6 +1412,7 @@ public:
 #define LPP_RELATIVE_HUMIDITY   0x68  // 104 - 0.5% unsigned
 #define LPP_ACCELEROMETER       0x71  // 113
 #define LPP_BAROMETRIC_PRESSURE 0x73  // 115 - 0.1 hPa
+#define LPP_VOLTAGE             0x74  // 116 - 0.01V unsigned (MeshCore)
 #define LPP_GYROMETER           0x86  // 134
 #define LPP_GPS                 0x88  // 136 - lat/lon/alt
 
@@ -1129,7 +1434,23 @@ public:
     }
 
     /**
-     * Add analog input (used for battery voltage)
+     * Add voltage (MeshCore format, LPP type 116)
+     * @param channel Channel number (TELEM_CHANNEL_SELF = 1)
+     * @param voltage Voltage in volts (e.g., 4.12)
+     */
+    bool addVoltage(uint8_t channel, float voltage) {
+        if (cursor + 4 > maxSize) return false;
+
+        uint16_t val = (uint16_t)(voltage * 100);
+        buffer[cursor++] = channel;
+        buffer[cursor++] = LPP_VOLTAGE;
+        buffer[cursor++] = (val >> 8) & 0xFF;
+        buffer[cursor++] = val & 0xFF;
+        return true;
+    }
+
+    /**
+     * Add analog input (standard CayenneLPP)
      * @param channel Channel number
      * @param value Value * 100 (e.g., 4.12V = 412)
      */

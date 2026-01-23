@@ -187,10 +187,11 @@ private:
     uint32_t lastAdvertTime;
     uint32_t advertInterval;
     bool enabled;
+    bool compatMode;  // MeshCore 1.11.0 compatibility mode (no flags byte)
 
 public:
     AdvertGenerator() : identity(nullptr), timeSync(nullptr), lastAdvertTime(0),
-                        advertInterval(300000), enabled(true) {} // 5 min default
+                        advertInterval(300000), enabled(true), compatMode(false) {} // 5 min default, standard mode with flags byte
 
     /**
      * Initialize with identity manager and time sync
@@ -228,6 +229,22 @@ public:
      */
     bool isEnabled() const {
         return enabled;
+    }
+
+    /**
+     * Set MeshCore 1.11.0 compatibility mode
+     * When enabled, ADVERT appdata contains only the name (no flags byte)
+     * This is needed because MeshCore 1.11.0 has a bug and doesn't send flags
+     */
+    void setCompatMode(bool compat) {
+        compatMode = compat;
+    }
+
+    /**
+     * Check if compatibility mode is enabled
+     */
+    bool isCompatMode() const {
+        return compatMode;
     }
 
     /**
@@ -348,42 +365,79 @@ private:
      * Build appdata section
      * @param appdata Output buffer
      * @return Length of appdata
+     *
+     * In compatibility mode (MeshCore 1.11.0): appdata = [name only]
+     * In standard mode: appdata = [flags][location?][name]
      */
     uint8_t buildAppdata(uint8_t* appdata) {
         uint8_t pos = 0;
 
-        // Flags byte
-        appdata[pos++] = identity->getFlags();
+        if (compatMode) {
+            // MeshCore 1.11.0 compatibility: appdata = [location?][name] - NO flags byte!
+            // AtomoZero sends: [lat 4B][lon 4B][name] when location is set
+            //                  [name] when no location
 
-        // Location (if set) - int32 * 1000000, little-endian
-        if (identity->hasLocation()) {
-            // Use stored int32 values directly (already * 1000000)
-            int32_t lat = identity->getLatitude();
-            int32_t lon = identity->getLongitude();
+            // Location (if set) - int32 * 1000000, little-endian
+            if (identity->hasLocation()) {
+                int32_t lat = identity->getLatitude();
+                int32_t lon = identity->getLongitude();
 
-            // Latitude as int32 (little-endian)
-            appdata[pos++] = lat & 0xFF;
-            appdata[pos++] = (lat >> 8) & 0xFF;
-            appdata[pos++] = (lat >> 16) & 0xFF;
-            appdata[pos++] = (lat >> 24) & 0xFF;
+                // Latitude as int32 (little-endian)
+                appdata[pos++] = lat & 0xFF;
+                appdata[pos++] = (lat >> 8) & 0xFF;
+                appdata[pos++] = (lat >> 16) & 0xFF;
+                appdata[pos++] = (lat >> 24) & 0xFF;
 
-            // Longitude as int32 (little-endian)
-            appdata[pos++] = lon & 0xFF;
-            appdata[pos++] = (lon >> 8) & 0xFF;
-            appdata[pos++] = (lon >> 16) & 0xFF;
-            appdata[pos++] = (lon >> 24) & 0xFF;
-        }
+                // Longitude as int32 (little-endian)
+                appdata[pos++] = lon & 0xFF;
+                appdata[pos++] = (lon >> 8) & 0xFF;
+                appdata[pos++] = (lon >> 16) & 0xFF;
+                appdata[pos++] = (lon >> 24) & 0xFF;
 
-        // Name (if set)
-        if (identity->getFlags() & MC_FLAG_HAS_NAME) {
+                Serial.printf("[DEBUG] ADVERT location: %.6f, %.6f\n\r",
+                              lat / 1000000.0f, lon / 1000000.0f);
+            }
+
+            // Name
             const char* name = identity->getNodeName();
             uint8_t nameLen = strlen(name);
             if (nameLen > 0 && nameLen < MC_NODE_NAME_MAX) {
                 memcpy(&appdata[pos], name, nameLen);
                 pos += nameLen;
             }
-        }
+        } else {
+            // Standard mode: appdata = [flags][location?][name]
+            uint8_t flags = identity->getFlags();
+            appdata[pos++] = flags;
 
+            // Location (if set) - int32 * 1000000, little-endian
+            if (identity->hasLocation()) {
+                int32_t lat = identity->getLatitude();
+                int32_t lon = identity->getLongitude();
+
+                // Latitude as int32 (little-endian)
+                appdata[pos++] = lat & 0xFF;
+                appdata[pos++] = (lat >> 8) & 0xFF;
+                appdata[pos++] = (lat >> 16) & 0xFF;
+                appdata[pos++] = (lat >> 24) & 0xFF;
+
+                // Longitude as int32 (little-endian)
+                appdata[pos++] = lon & 0xFF;
+                appdata[pos++] = (lon >> 8) & 0xFF;
+                appdata[pos++] = (lon >> 16) & 0xFF;
+                appdata[pos++] = (lon >> 24) & 0xFF;
+            }
+
+            // Name (if set)
+            if (identity->getFlags() & MC_FLAG_HAS_NAME) {
+                const char* name = identity->getNodeName();
+                uint8_t nameLen = strlen(name);
+                if (nameLen > 0 && nameLen < MC_NODE_NAME_MAX) {
+                    memcpy(&appdata[pos], name, nameLen);
+                    pos += nameLen;
+                }
+            }
+        }
         return pos;
     }
 
@@ -425,30 +479,128 @@ public:
         // Get flags byte (at position 100)
         info->flags = payload[ADVERT_FLAGS_OFFSET];
 
-        // Decode node type (lower 4 bits) and flags (upper 4 bits)
+        uint16_t appdataLen = payloadLen - ADVERT_FLAGS_OFFSET;
+
+        // Detect MeshCore bug: some firmware versions don't send the flags byte properly
+        // when location is enabled. The name starts 1 byte earlier than expected.
+        // We detect this by checking if the flags byte looks like valid flags vs ASCII text.
+        // Valid flags should have HAS_NAME (0x80) set if there's a name, and the lower nibble
+        // should be a valid node type (0x00-0x04).
+        bool flagsLookValid = true;
         uint8_t nodeType = info->flags & MC_TYPE_MASK;
-        info->isRepeater = (nodeType == MC_TYPE_REPEATER);
-        info->isChatNode = (nodeType == MC_TYPE_CHAT_NODE);
-        info->hasLocation = (info->flags & MC_FLAG_HAS_LOCATION) != 0;
-        info->hasName = (info->flags & MC_FLAG_HAS_NAME) != 0;
 
-        uint16_t pos = ADVERT_FLAGS_OFFSET + 1;  // After flags byte
+        // MeshCore bug workaround: some firmware versions have malformed appdata
+        // We need to detect the actual structure by looking at the data pattern
+        //
+        // Expected valid flags: 0x80-0x94 (HAS_NAME set, valid node type 0-4)
+        // If first byte is ASCII letter (0x41-0x7A), it's likely part of name/data, not flags
+        //
+        // Appdata patterns we've seen:
+        // 1. Normal: [flags] [location?] [name]     - flags has HAS_NAME (0x80) set
+        // 2. Bug v1: [name only]                    - first byte is ASCII letter
+        // 3. Bug v2: [location 8 bytes] [name]     - no flags, location + name
 
-        // Parse location if present (int32 * 1000000, little-endian)
-        if (info->hasLocation && payloadLen >= pos + 8) {
-            // Latitude as int32 * 1000000
-            int32_t latInt = (int32_t)(payload[pos] | (payload[pos+1] << 8) |
-                              (payload[pos+2] << 16) | (payload[pos+3] << 24));
-            info->latitude = latInt / 1000000.0f;
+        uint16_t pos = ADVERT_FLAGS_OFFSET;
 
-            // Longitude as int32 * 1000000
-            int32_t lonInt = (int32_t)(payload[pos+4] | (payload[pos+5] << 8) |
-                              (payload[pos+6] << 16) | (payload[pos+7] << 24));
-            info->longitude = lonInt / 1000000.0f;
-            pos += 8;
+        // Check if this looks like valid flags (bit 7 = HAS_NAME should be set for named nodes)
+        bool hasValidFlags = (info->flags & 0x80) != 0 && (nodeType <= 0x04);
+
+        if (hasValidFlags) {
+            // Normal parsing - flags byte is present
+            pos++;  // Skip flags byte
+
+            // Decode node type (lower 4 bits) and flags (upper 4 bits)
+            info->isRepeater = (nodeType == MC_TYPE_REPEATER);
+            info->isChatNode = (nodeType == MC_TYPE_CHAT_NODE);
+            info->hasLocation = (info->flags & MC_FLAG_HAS_LOCATION) != 0;
+            info->hasName = (info->flags & MC_FLAG_HAS_NAME) != 0;
+
+            // Parse location if present (int32 * 1000000, per MeshCore spec)
+            if (info->hasLocation && payloadLen >= pos + 8) {
+                // Check if location data looks valid or if name starts early (MeshCore bug)
+                // If byte at pos+7 is printable ASCII letter, the name likely starts there
+                bool nameStartsAt7 = (payload[pos + 7] >= 0x41 && payload[pos + 7] <= 0x7A);
+
+                if (nameStartsAt7) {
+                    // MeshCore bug: location is only 7 bytes, name starts at pos+7
+                    int32_t latInt = (int32_t)(payload[pos] | (payload[pos+1] << 8) |
+                                      (payload[pos+2] << 16));
+                    int32_t lonInt = (int32_t)(payload[pos+3] | (payload[pos+4] << 8) |
+                                      (payload[pos+5] << 16) | (payload[pos+6] << 24));
+                    info->latitude = latInt / 1000000.0f;
+                    info->longitude = lonInt / 1000000.0f;
+                    pos += 7;
+                } else {
+                    // Normal 8-byte location
+                    int32_t latInt = (int32_t)(payload[pos] | (payload[pos+1] << 8) |
+                                      (payload[pos+2] << 16) | (payload[pos+3] << 24));
+                    int32_t lonInt = (int32_t)(payload[pos+4] | (payload[pos+5] << 8) |
+                                      (payload[pos+6] << 16) | (payload[pos+7] << 24));
+                    info->latitude = latInt / 1000000.0f;
+                    info->longitude = lonInt / 1000000.0f;
+                    pos += 8;
+                }
+            }
+        } else {
+            // No valid flags byte - need to detect structure from data
+            // Check if this is [location 8 bytes][name] or just [name]
+
+            // Look for where the name starts by finding ASCII letters
+            // Name "AtomoZero" etc starts with capital letter (0x41-0x5A)
+            int nameStart = -1;
+            for (int i = 0; i < (int)appdataLen && i < 16; i++) {
+                uint8_t b = payload[ADVERT_FLAGS_OFFSET + i];
+                // Check if this could be start of a name (capital letter)
+                if (b >= 0x41 && b <= 0x5A) {
+                    // Verify next few bytes also look like name (letters/numbers/dash)
+                    bool looksLikeName = true;
+                    for (int j = 1; j < 4 && (i + j) < (int)appdataLen; j++) {
+                        uint8_t c = payload[ADVERT_FLAGS_OFFSET + i + j];
+                        if (!((c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) ||
+                              (c >= 0x30 && c <= 0x39) || c == 0x2D)) {
+                            looksLikeName = false;
+                            break;
+                        }
+                    }
+                    if (looksLikeName) {
+                        nameStart = i;
+                        break;
+                    }
+                }
+            }
+
+            if (nameStart >= 8) {
+                // There's 8+ bytes before the name - this is location data
+                info->hasLocation = true;
+
+                // Extract latitude (first 4 bytes, little-endian)
+                int32_t latRaw = payload[ADVERT_FLAGS_OFFSET] |
+                                (payload[ADVERT_FLAGS_OFFSET + 1] << 8) |
+                                (payload[ADVERT_FLAGS_OFFSET + 2] << 16) |
+                                (payload[ADVERT_FLAGS_OFFSET + 3] << 24);
+                info->latitude = latRaw / 1000000.0f;
+
+                // Extract longitude (next 4 bytes, little-endian)
+                int32_t lonRaw = payload[ADVERT_FLAGS_OFFSET + 4] |
+                                (payload[ADVERT_FLAGS_OFFSET + 5] << 8) |
+                                (payload[ADVERT_FLAGS_OFFSET + 6] << 16) |
+                                (payload[ADVERT_FLAGS_OFFSET + 7] << 24);
+                info->longitude = lonRaw / 1000000.0f;
+
+                // Skip the location data (8 bytes) to get to name
+                pos = ADVERT_FLAGS_OFFSET + 8;
+            } else if (nameStart > 0) {
+                // Some data before name but not 8 bytes - skip it
+                pos = ADVERT_FLAGS_OFFSET + nameStart;
+            }
+            // else: name starts at beginning, no location
+
+            info->flags = MC_TYPE_CHAT_NODE | MC_FLAG_HAS_NAME;
+            info->isChatNode = true;
+            info->hasName = true;
         }
 
-        // Parse name if present (name is remaining bytes after optional fields, no length prefix)
+        // Parse name if present (name is remaining bytes after optional fields)
         if (info->hasName && payloadLen > pos) {
             uint8_t nameLen = payloadLen - pos;
             if (nameLen > MC_NODE_NAME_MAX - 1) {

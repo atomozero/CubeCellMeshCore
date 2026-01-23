@@ -96,11 +96,10 @@ public:
 
     /**
      * Read battery voltage
-     * Uses CubeCell built-in getBatteryVoltage() function
+     * Uses CubeCell built-in getBatteryVoltage() from LoRaWan library
      */
     void readBattery() {
         #ifdef CUBECELL
-        // Use CubeCell built-in function (returns mV)
         data.batteryMv = getBatteryVoltage();
         #else
         data.batteryMv = 0;

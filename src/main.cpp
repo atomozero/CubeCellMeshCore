@@ -6,14 +6,423 @@
  */
 
 #include "main.h"
+#include "core/Led.h"
+#include "core/Config.h"
+
+//=============================================================================
+// Forward declarations
+//=============================================================================
+void sendAdvertNoFlags();
+#ifndef LITE_MODE
+void sendDirectMessage(const char* recipientName, const char* message);
+#endif
+bool transmitPacket(MCPacket* pkt);
+void startReceive();
+bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int16_t rssi);
+uint32_t getPacketId(MCPacket* pkt);
 
 //=============================================================================
 // Serial Command Handler
 //=============================================================================
 #ifndef SILENT
-char cmdBuffer[64];  // Increased for location commands
+char cmdBuffer[48];  // Reduced from 64 to save RAM
 uint8_t cmdPos = 0;
 
+#if defined(MINIMAL_DEBUG) && defined(LITE_MODE)
+// Minimal command handler - essential commands only
+void processCommand(char* cmd) {
+    if (strcmp(cmd, "?") == 0 || strcmp(cmd, "help") == 0) {
+        LOG_RAW("Cmds:status stats lifetime advert nodes contacts neighbours telemetry identity\n\r"
+                "name[n] location[lat lon] time[ts] nodetype passwd sleep rxboost\n\r"
+                "ratelimit[on|off|reset] savestats alert[on|off|dest|clear|test] newid reset save reboot\n\r");
+    }
+    else if (strcmp(cmd, "status") == 0) {
+        LOG_RAW("FW:%s Node:%s Hash:%02X\n\r", FIRMWARE_VERSION, nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
+        LOG_RAW("Freq:%.3f BW:%.1f SF:%d CR:4/%d TX:%ddBm\n\r", MC_FREQUENCY, MC_BANDWIDTH, MC_SPREADING, MC_CODING_RATE, MC_TX_POWER);
+        LOG_RAW("Time:%s RSSI:%d SNR:%d.%d\n\r", timeSync.isSynchronized()?"sync":"nosync", lastRssi, lastSnr/4, abs(lastSnr%4)*25);
+    }
+    else if (strcmp(cmd, "stats") == 0) {
+        LOG_RAW("RX:%lu TX:%lu FWD:%lu ERR:%lu\n\r", rxCount, txCount, fwdCount, errCount);
+        LOG_RAW("ADV TX:%lu RX:%lu Q:%d/%d\n\r", advTxCount, advRxCount, txQueue.getCount(), MC_TX_QUEUE_SIZE);
+    }
+    else if (strcmp(cmd, "lifetime") == 0) {
+        const PersistentStats* ps = getPersistentStats();
+        LOG_RAW("=== Lifetime Stats ===\n\r");
+        LOG_RAW("Boots: %d\n\r", ps->bootCount);
+        LOG_RAW("Uptime: %lu sec\n\r", statsGetTotalUptime());
+        LOG_RAW("RX: %lu TX: %lu FWD: %lu\n\r", ps->totalRxPackets, ps->totalTxPackets, ps->totalFwdPackets);
+        LOG_RAW("Unique nodes: %lu\n\r", ps->totalUniqueNodes);
+        LOG_RAW("Logins: %lu (failed: %lu)\n\r", ps->totalLogins, ps->totalLoginFails);
+        LOG_RAW("Rate limited: %lu\n\r", ps->totalRateLimited);
+    }
+    else if (strcmp(cmd, "savestats") == 0) {
+        savePersistentStats();
+        LOG_RAW("Stats saved to EEPROM\n\r");
+    }
+    else if (strcmp(cmd, "ratelimit") == 0) {
+        LOG_RAW("RateLimit: %s\n\r", repeaterHelper.isRateLimitEnabled() ? "ON" : "OFF");
+        LOG_RAW("Login: %lu blocked (max %d/%ds)\n\r",
+            repeaterHelper.getLoginLimiter().getTotalBlocked(),
+            RATE_LIMIT_LOGIN_MAX, RATE_LIMIT_LOGIN_SECS);
+        LOG_RAW("Request: %lu blocked (max %d/%ds)\n\r",
+            repeaterHelper.getRequestLimiter().getTotalBlocked(),
+            RATE_LIMIT_REQUEST_MAX, RATE_LIMIT_REQUEST_SECS);
+        LOG_RAW("Forward: %lu blocked (max %d/%ds)\n\r",
+            repeaterHelper.getForwardLimiter().getTotalBlocked(),
+            RATE_LIMIT_FORWARD_MAX, RATE_LIMIT_FORWARD_SECS);
+    }
+    else if (strncmp(cmd, "ratelimit ", 10) == 0) {
+        if (strcmp(cmd + 10, "on") == 0) {
+            repeaterHelper.setRateLimitEnabled(true);
+            LOG_RAW("RateLimit enabled\n\r");
+        } else if (strcmp(cmd + 10, "off") == 0) {
+            repeaterHelper.setRateLimitEnabled(false);
+            LOG_RAW("RateLimit disabled\n\r");
+        } else if (strcmp(cmd + 10, "reset") == 0) {
+            repeaterHelper.resetRateLimitStats();
+            LOG_RAW("RateLimit stats reset\n\r");
+        }
+    }
+    else if (strcmp(cmd, "advert") == 0) {
+        sendAdvert(true);
+    }
+    else if (strcmp(cmd, "nodes") == 0) {
+        LOG_RAW("Nodes:%d\n\r", seenNodes.getCount());
+        for (uint8_t i = 0; i < seenNodes.getCount(); i++) {
+            const SeenNode* n = seenNodes.getNode(i);
+            if (n) LOG_RAW(" %02X %s %ddBm\n\r", n->hash, n->name[0]?n->name:"-", n->lastRssi);
+        }
+    }
+    else if (strcmp(cmd, "newid") == 0) {
+        LOG_RAW("Generating new identity...\n\r");
+        nodeIdentity.reset();
+        LOG_RAW("New: %s (hash:%02X) - reboot now\n\r", nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
+    }
+    #ifdef ENABLE_CRYPTO_TESTS
+    else if (strcmp(cmd, "test") == 0) {
+        // RFC 8032 Test Vector 1: empty message - VERIFY test
+        const uint8_t pubkey[] = {
+            0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7,
+            0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
+            0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25,
+            0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a
+        };
+        const uint8_t sig[] = {
+            0xe5, 0x56, 0x43, 0x00, 0xc3, 0x60, 0xac, 0x72,
+            0x90, 0x86, 0xe2, 0xcc, 0x80, 0x6e, 0x82, 0x8a,
+            0x84, 0x87, 0x7f, 0x1e, 0xb8, 0xe5, 0xd9, 0x74,
+            0xd8, 0x73, 0xe0, 0x65, 0x22, 0x49, 0x01, 0x55,
+            0x5f, 0xb8, 0x82, 0x15, 0x90, 0xa3, 0x3b, 0xac,
+            0xc6, 0x1e, 0x39, 0x70, 0x1c, 0xf9, 0xb4, 0x6b,
+            0xd2, 0x5b, 0xf5, 0xf0, 0x59, 0x5b, 0xbe, 0x24,
+            0x65, 0x51, 0x41, 0x43, 0x8e, 0x7a, 0x10, 0x0b
+        };
+        bool ok = IdentityManager::verify(sig, pubkey, NULL, 0);
+        LOG_RAW("RFC8032 Verify (empty msg): %s\n\r", ok ? "PASS" : "FAIL");
+
+        // RFC 8032 Test Vector 1: SIGN test
+        const uint8_t seed[] = {
+            0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60,
+            0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
+            0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19,
+            0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60
+        };
+        const uint8_t expected_sig[] = {
+            0xe5, 0x56, 0x43, 0x00, 0xc3, 0x60, 0xac, 0x72,
+            0x90, 0x86, 0xe2, 0xcc, 0x80, 0x6e, 0x82, 0x8a,
+            0x84, 0x87, 0x7f, 0x1e, 0xb8, 0xe5, 0xd9, 0x74,
+            0xd8, 0x73, 0xe0, 0x65, 0x22, 0x49, 0x01, 0x55,
+            0x5f, 0xb8, 0x82, 0x15, 0x90, 0xa3, 0x3b, 0xac,
+            0xc6, 0x1e, 0x39, 0x70, 0x1c, 0xf9, 0xb4, 0x6b,
+            0xd2, 0x5b, 0xf5, 0xf0, 0x59, 0x5b, 0xbe, 0x24,
+            0x65, 0x51, 0x41, 0x43, 0x8e, 0x7a, 0x10, 0x0b
+        };
+
+        uint8_t test_pubkey[32];
+        uint8_t test_privkey[64];
+        ed25519_create_keypair(test_pubkey, test_privkey, seed);
+
+        bool pubkey_ok = (memcmp(test_pubkey, pubkey, 32) == 0);
+        LOG_RAW("RFC8032 Keypair gen: %s\n\r", pubkey_ok ? "PASS" : "FAIL");
+
+        uint8_t test_sig[64];
+        ed25519_sign(test_sig, NULL, 0, test_pubkey, test_privkey);
+
+        bool sign_ok = (memcmp(test_sig, expected_sig, 64) == 0);
+        LOG_RAW("RFC8032 Sign (empty msg): %s\n\r", sign_ok ? "PASS" : "FAIL");
+    }
+    #endif // ENABLE_CRYPTO_TESTS
+    else if (strcmp(cmd, "nodetype chat") == 0) {
+        uint8_t flags = nodeIdentity.getFlags();
+        flags = (flags & 0xF0) | MC_TYPE_CHAT_NODE;
+        nodeIdentity.setFlags(flags);
+        nodeIdentity.save();
+        LOG_RAW("Node type: CHAT (0x%02X) - send advert\n\r", flags);
+    }
+    else if (strcmp(cmd, "nodetype repeater") == 0) {
+        uint8_t flags = nodeIdentity.getFlags();
+        flags = (flags & 0xF0) | MC_TYPE_REPEATER;
+        nodeIdentity.setFlags(flags);
+        nodeIdentity.save();
+        LOG_RAW("Node type: REPEATER (0x%02X) - send advert\n\r", flags);
+    }
+    else if (strcmp(cmd, "passwd") == 0) {
+        LOG_RAW("Admin: %s  Guest: %s\n\r",
+            sessionManager.getAdminPassword(),
+            sessionManager.getGuestPassword());
+    }
+    else if (strncmp(cmd, "passwd admin ", 13) == 0) {
+        sessionManager.setAdminPassword(cmd + 13);
+        saveConfig();
+        LOG_RAW("Admin password set: %s\n\r", cmd + 13);
+    }
+    else if (strncmp(cmd, "passwd guest ", 13) == 0) {
+        sessionManager.setGuestPassword(cmd + 13);
+        saveConfig();
+        LOG_RAW("Guest password set: %s\n\r", cmd + 13);
+    }
+    else if (strcmp(cmd, "sleep on") == 0) {
+        deepSleepEnabled = true;
+        saveConfig();
+        LOG_RAW("Deep sleep: ON\n\r");
+    }
+    else if (strcmp(cmd, "sleep off") == 0) {
+        deepSleepEnabled = false;
+        saveConfig();
+        LOG_RAW("Deep sleep: OFF (serial always active)\n\r");
+    }
+    else if (strcmp(cmd, "sleep") == 0) {
+        LOG_RAW("Deep sleep: %s\n\r", deepSleepEnabled ? "ON" : "OFF");
+    }
+    else if (strcmp(cmd, "rxboost on") == 0) {
+        rxBoostEnabled = true;
+        applyPowerSettings();
+        saveConfig();
+        LOG_RAW("RX Boost: ON\n\r");
+    }
+    else if (strcmp(cmd, "rxboost off") == 0) {
+        rxBoostEnabled = false;
+        applyPowerSettings();
+        saveConfig();
+        LOG_RAW("RX Boost: OFF\n\r");
+    }
+    else if (strcmp(cmd, "rxboost") == 0) {
+        LOG_RAW("RX Boost: %s\n\r", rxBoostEnabled ? "ON" : "OFF");
+    }
+    else if (strcmp(cmd, "time") == 0) {
+        if (timeSync.isSynchronized()) {
+            LOG_RAW("Time: %lu (synced)\n\r", timeSync.getTimestamp());
+        } else {
+            LOG_RAW("Time: not synced\n\r");
+        }
+    }
+    else if (strncmp(cmd, "time ", 5) == 0) {
+        uint32_t ts = strtoul(cmd + 5, NULL, 10);
+        if (ts > 1577836800) {
+            timeSync.setTime(ts);
+            LOG_RAW("Time set: %lu\n\r", ts);
+        } else {
+            LOG_RAW("Invalid timestamp\n\r");
+        }
+    }
+    else if (strncmp(cmd, "name ", 5) == 0) {
+        const char* newName = cmd + 5;
+        if (strlen(newName) > 0 && strlen(newName) < 16) {
+            nodeIdentity.setNodeName(newName);
+            nodeIdentity.save();
+            LOG_RAW("Name set: %s\n\r", nodeIdentity.getNodeName());
+        } else {
+            LOG_RAW("Name must be 1-15 chars\n\r");
+        }
+    }
+    else if (strcmp(cmd, "name") == 0) {
+        LOG_RAW("Name: %s\n\r", nodeIdentity.getNodeName());
+    }
+    else if (strncmp(cmd, "location ", 9) == 0) {
+        char* args = (char*)(cmd + 9);
+        char* space = strchr(args, ' ');
+        if (space != NULL) {
+            *space = '\0';
+            float lat = atof(args);
+            float lon = atof(space + 1);
+            if (lat >= -90.0f && lat <= 90.0f && lon >= -180.0f && lon <= 180.0f) {
+                nodeIdentity.setLocation(lat, lon);
+                nodeIdentity.save();
+                LOG_RAW("Location: %.6f, %.6f\n\r", lat, lon);
+            } else {
+                LOG_RAW("Invalid coords\n\r");
+            }
+        } else {
+            LOG_RAW("Usage: location LAT LON\n\r");
+        }
+    }
+    else if (strcmp(cmd, "location") == 0) {
+        if (nodeIdentity.hasLocation()) {
+            LOG_RAW("Location: %.6f, %.6f\n\r",
+                nodeIdentity.getLatitudeFloat(), nodeIdentity.getLongitudeFloat());
+        } else {
+            LOG_RAW("Location: not set\n\r");
+        }
+    }
+    else if (strcmp(cmd, "location clear") == 0) {
+        nodeIdentity.clearLocation();
+        nodeIdentity.save();
+        LOG_RAW("Location cleared\n\r");
+    }
+    else if (strcmp(cmd, "identity") == 0) {
+        LOG_RAW("Name: %s  Hash: %02X  Type: %d\n\r",
+            nodeIdentity.getNodeName(), nodeIdentity.getNodeHash(),
+            nodeIdentity.getFlags() & 0x0F);
+        const uint8_t* pk = nodeIdentity.getPublicKey();
+        LOG_RAW("PubKey: ");
+        for (int i = 0; i < 32; i++) LOG_RAW("%02x", pk[i]);
+        LOG_RAW("\n\r");
+    }
+    else if (strcmp(cmd, "contacts") == 0) {
+        LOG_RAW("Contacts: %d\n\r", contactMgr.getCount());
+        for (uint8_t i = 0; i < contactMgr.getCount(); i++) {
+            Contact* c = contactMgr.getContact(i);
+            if (c) LOG_RAW(" %02X %s %ddBm\n\r", c->getHash(),
+                c->name[0] ? c->name : "-", c->lastRssi);
+        }
+    }
+    else if (strncmp(cmd, "contact ", 8) == 0) {
+        // Show full pubkey for a contact by hash: contact XX
+        uint8_t hash = strtoul(cmd + 8, NULL, 16);
+        Contact* c = contactMgr.findByHash(hash);
+        if (c) {
+            LOG_RAW("Contact: %s (hash %02X)\n\r", c->name, c->getHash());
+            LOG_RAW("PubKey: ");
+            for (int i = 0; i < 32; i++) LOG_RAW("%02X", c->pubKey[i]);
+            LOG_RAW("\n\r");
+        } else {
+            LOG_RAW("Contact %02X not found\n\r", hash);
+        }
+    }
+    else if (strcmp(cmd, "neighbours") == 0 || strcmp(cmd, "neighbors") == 0) {
+        NeighbourTracker& nb = repeaterHelper.getNeighbours();
+        uint8_t cnt = nb.getCount();
+        LOG_RAW("Neighbours: %d\n\r", cnt);
+        for (uint8_t i = 0; i < cnt; i++) {
+            const NeighbourInfo* n = nb.getNeighbour(i);
+            if (n) {
+                uint32_t ago = (millis() - n->lastHeard) / 1000;
+                LOG_RAW(" %02X%02X%02X%02X%02X%02X rssi=%d snr=%d ago=%lus\n\r",
+                    n->pubKeyPrefix[0], n->pubKeyPrefix[1], n->pubKeyPrefix[2],
+                    n->pubKeyPrefix[3], n->pubKeyPrefix[4], n->pubKeyPrefix[5],
+                    n->rssi, n->snr, ago);
+            }
+        }
+    }
+    else if (strncmp(cmd, "advert interval ", 16) == 0) {
+        uint32_t interval = strtoul(cmd + 16, NULL, 10);
+        if (interval >= 60 && interval <= 86400) {
+            advertGen.setInterval(interval * 1000);
+            LOG_RAW("ADVERT interval: %lus\n\r", interval);
+        } else {
+            LOG_RAW("Invalid (60-86400)\n\r");
+        }
+    }
+    else if (strcmp(cmd, "advert interval") == 0) {
+        LOG_RAW("ADVERT interval: %lus (next in %lus)\n\r",
+            advertGen.getInterval() / 1000, advertGen.getTimeUntilNext());
+    }
+    else if (strcmp(cmd, "telemetry") == 0) {
+        telemetry.update();
+        const TelemetryData* t = telemetry.getData();
+        LOG_RAW("Battery: %dmV (%d%%)\n\r", t->batteryMv, telemetry.getBatteryPercent());
+        LOG_RAW("Temp: %dC  Uptime: %lus\n\r", t->temperature, t->uptime);
+        LOG_RAW("RX:%lu TX:%lu FWD:%lu ERR:%lu\n\r",
+            t->rxCount, t->txCount, t->fwdCount, t->errorCount);
+    }
+    else if (strcmp(cmd, "alert") == 0) {
+        bool keySet = false;
+        for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
+            if (alertDestPubKey[i] != 0) { keySet = true; break; }
+        }
+        LOG_RAW("Alert: %s  Dest: %s\n\r",
+            alertEnabled ? "ON" : "OFF",
+            keySet ? "set" : "not set");
+        if (keySet) {
+            LOG_RAW("  Hash: %02X\n\r", alertDestPubKey[0]);
+        }
+    }
+    else if (strcmp(cmd, "alert on") == 0) {
+        bool keySet = false;
+        for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
+            if (alertDestPubKey[i] != 0) { keySet = true; break; }
+        }
+        if (keySet) {
+            alertEnabled = true;
+            saveConfig();
+            LOG_RAW("Node alert: ON\n\r");
+        } else {
+            LOG_RAW("Set destination first: alert dest <pubkey>\n\r");
+        }
+    }
+    else if (strcmp(cmd, "alert off") == 0) {
+        alertEnabled = false;
+        saveConfig();
+        LOG_RAW("Node alert: OFF\n\r");
+    }
+    else if (strncmp(cmd, "alert dest ", 11) == 0) {
+        const char* arg = cmd + 11;
+        // Try to find contact by name first
+        Contact* c = contactMgr.findByName(arg);
+        if (c) {
+            memcpy(alertDestPubKey, c->pubKey, REPORT_PUBKEY_SIZE);
+            saveConfig();
+            LOG_RAW("Alert dest: %s (%02X)\n\r", c->name, alertDestPubKey[0]);
+        }
+        // Otherwise try hex pubkey (64 chars = 32 bytes)
+        else if (strlen(arg) >= 64) {
+            for (int i = 0; i < 32; i++) {
+                char byte[3] = {arg[i*2], arg[i*2+1], 0};
+                alertDestPubKey[i] = strtoul(byte, NULL, 16);
+            }
+            saveConfig();
+            LOG_RAW("Alert dest set: %02X%02X%02X%02X...\n\r",
+                alertDestPubKey[0], alertDestPubKey[1],
+                alertDestPubKey[2], alertDestPubKey[3]);
+        } else {
+            LOG_RAW("Contact '%s' not found\n\r", arg);
+        }
+    }
+    else if (strcmp(cmd, "alert clear") == 0) {
+        memset(alertDestPubKey, 0, REPORT_PUBKEY_SIZE);
+        alertEnabled = false;
+        saveConfig();
+        LOG_RAW("Alert destination cleared\n\r");
+    }
+    else if (strcmp(cmd, "alert test") == 0) {
+        if (sendNodeAlert("TestNode", 0xAA, 1, -50)) {
+            LOG_RAW("Test alert sent\n\r");
+        } else {
+            LOG_RAW("Alert not configured or time not synced\n\r");
+        }
+    }
+    else if (strcmp(cmd, "reset") == 0) {
+        resetConfig();
+        applyPowerSettings();
+        LOG_RAW("Config reset to defaults\n\r");
+    }
+    else if (strcmp(cmd, "save") == 0) {
+        saveConfig();
+        LOG_RAW("Config saved\n\r");
+    }
+    else if (strcmp(cmd, "reboot") == 0) {
+        LOG_RAW("Rebooting...\n\r");
+        delay(100);
+        #ifdef CUBECELL
+        NVIC_SystemReset();
+        #endif
+    }
+    else if (strlen(cmd) > 0) {
+        LOG_RAW("Unknown: %s\n\r", cmd);
+    }
+}
+#else
+// Full command handler with ANSI formatting
 void processCommand(char* cmd) {
     if (strcmp(cmd, "status") == 0) {
         LOG_RAW("\n\r");
@@ -93,6 +502,20 @@ void processCommand(char* cmd) {
         saveConfig();
         LOG(TAG_OK " Deep sleep disabled\n\r");
     }
+    else if (strcmp(cmd, "nodetype chat") == 0) {
+        // Change node type to CHAT (for testing visibility in MeshCore app)
+        uint8_t flags = nodeIdentity.getFlags();
+        flags = (flags & 0xF0) | MC_TYPE_CHAT_NODE;  // Keep upper flags, change type
+        nodeIdentity.setFlags(flags);
+        LOG(TAG_OK " Node type changed to CHAT (0x%02X) - send 'advert' to announce\n\r", flags);
+    }
+    else if (strcmp(cmd, "nodetype repeater") == 0) {
+        // Change node type back to REPEATER
+        uint8_t flags = nodeIdentity.getFlags();
+        flags = (flags & 0xF0) | MC_TYPE_REPEATER;  // Keep upper flags, change type
+        nodeIdentity.setFlags(flags);
+        LOG(TAG_OK " Node type changed to REPEATER (0x%02X) - send 'advert' to announce\n\r", flags);
+    }
     else if (strcmp(cmd, "mode 0") == 0 || strcmp(cmd, "mode perf") == 0) {
         powerSaveMode = 0;
         saveConfig();
@@ -115,6 +538,12 @@ void processCommand(char* cmd) {
         resetConfig();
         applyPowerSettings();
     }
+    else if (strcmp(cmd, "newid") == 0) {
+        LOG(TAG_WARN " Generating new identity with orlp crypto...\n\r");
+        nodeIdentity.reset();
+        LOG(TAG_OK " New identity: %s (hash: %02X)\n\r", nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
+        LOG(TAG_INFO " Reboot to apply changes\n\r");
+    }
     else if (strcmp(cmd, "reboot") == 0) {
         LOG(TAG_INFO " Rebooting...\n\r");
         delay(100);
@@ -124,6 +553,20 @@ void processCommand(char* cmd) {
     }
     else if (strcmp(cmd, "ping") == 0) {
         sendPing();
+    }
+    else if (strcmp(cmd, "advert compat on") == 0) {
+        // Enable MeshCore 1.11.0 compatibility mode (no flags byte)
+        advertGen.setCompatMode(true);
+        LOG(TAG_OK " ADVERT compat mode: ON (no flags byte)\n\r");
+    }
+    else if (strcmp(cmd, "advert compat off") == 0) {
+        // Disable compatibility mode (standard format with flags)
+        advertGen.setCompatMode(false);
+        LOG(TAG_OK " ADVERT compat mode: OFF (standard format)\n\r");
+    }
+    else if (strcmp(cmd, "advert compat") == 0) {
+        // Show current compat mode
+        LOG(TAG_INFO " ADVERT compat mode: %s\n\r", advertGen.isCompatMode() ? "ON" : "OFF");
     }
     else if (strcmp(cmd, "advert") == 0) {
         sendAdvert(true);  // Send flood ADVERT
@@ -501,6 +944,7 @@ void processCommand(char* cmd) {
             repeaterHelper.isRepeatEnabled() ? "ON" : "OFF",
             repeaterHelper.getMaxFloodHops());
     }
+#ifndef LITE_MODE
     // Daily report commands
     else if (strcmp(cmd, "report") == 0) {
         LOG_RAW("\n\r");
@@ -583,6 +1027,7 @@ void processCommand(char* cmd) {
             LOG(TAG_ERROR " Invalid time format. Use: report time HH:MM\n\r");
         }
     }
+#endif // LITE_MODE - end of daily report commands
     else if (strcmp(cmd, "help") == 0) {
         LOG_RAW("\n\r");
         LOG_RAW(ANSI_CYAN "┌────────────────────────────────┐\n\r");
@@ -636,10 +1081,34 @@ void processCommand(char* cmd) {
         LOG_RAW(ANSI_CYAN "│  " ANSI_RED "reboot" ANSI_WHITE "     Restart system   " ANSI_RESET ANSI_CYAN "│\n\r");
         LOG_RAW(ANSI_CYAN "└────────────────────────────────┘" ANSI_RESET "\n\r");
     }
+    // Contact and messaging commands
+#ifndef LITE_MODE
+    else if (strcmp(cmd, "contacts") == 0) {
+        contactMgr.printContacts();
+    }
+    else if (strncmp(cmd, "msg ", 4) == 0) {
+        // Parse "msg <name> <message>" command
+        // Find first space after "msg "
+        char* nameStart = cmd + 4;
+        char* msgStart = strchr(nameStart, ' ');
+        if (msgStart) {
+            *msgStart = '\0';  // Terminate name
+            msgStart++;  // Start of message
+            if (strlen(msgStart) > 0) {
+                sendDirectMessage(nameStart, msgStart);
+            } else {
+                LOG(TAG_ERROR " Empty message\n\r");
+            }
+        } else {
+            LOG(TAG_ERROR " Usage: msg <name> <message>\n\r");
+        }
+    }
+#endif
     else if (strlen(cmd) > 0) {
         LOG(TAG_ERROR " Unknown command: %s\n\r", cmd);
     }
 }
+#endif // MINIMAL_DEBUG && LITE_MODE
 
 void checkSerial() {
     while (Serial.available()) {
@@ -868,118 +1337,6 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
 }
 
 //=============================================================================
-// LED Functions
-//=============================================================================
-void initLed() {
-#ifdef MC_SIGNAL_NEOPIXEL
-    pinMode(Vext, OUTPUT);
-    digitalWrite(Vext, HIGH);  // Start with Vext off
-    pixels.begin();
-    pixels.clear();
-    pixels.show();
-#endif
-#ifdef MC_SIGNAL_GPIO13
-    pinMode(GPIO13, OUTPUT);
-    digitalWrite(GPIO13, LOW);
-#endif
-}
-
-void ledVextOn() {
-#ifdef MC_SIGNAL_NEOPIXEL
-    digitalWrite(Vext, LOW);
-    delay(1);
-#endif
-}
-
-void ledRxOn() {
-#ifdef MC_SIGNAL_NEOPIXEL
-    ledVextOn();
-    pixels.setPixelColor(0, pixels.Color(0, 16, 0));  // Green
-    pixels.show();
-#endif
-#ifdef MC_SIGNAL_GPIO13
-    digitalWrite(GPIO13, HIGH);
-#endif
-}
-
-void ledTxOn() {
-#ifdef MC_SIGNAL_NEOPIXEL
-    ledVextOn();
-    pixels.setPixelColor(0, pixels.Color(16, 0, 16));  // Viola (red + blue)
-    pixels.show();
-#endif
-#ifdef MC_SIGNAL_GPIO13
-    digitalWrite(GPIO13, HIGH);
-#endif
-}
-
-void ledRedSolid() {
-#ifdef MC_SIGNAL_NEOPIXEL
-    ledVextOn();
-    pixels.setPixelColor(0, pixels.Color(16, 0, 0));  // Red
-    pixels.show();
-#endif
-#ifdef MC_SIGNAL_GPIO13
-    digitalWrite(GPIO13, HIGH);
-#endif
-}
-
-void ledGreenBlink() {
-#ifdef MC_SIGNAL_NEOPIXEL
-    ledVextOn();
-    pixels.setPixelColor(0, pixels.Color(0, 32, 0));  // Green bright
-    pixels.show();
-    delay(50);
-    pixels.clear();
-    pixels.show();
-#endif
-#ifdef MC_SIGNAL_GPIO13
-    digitalWrite(GPIO13, HIGH);
-    delay(50);
-    digitalWrite(GPIO13, LOW);
-#endif
-}
-
-void ledBlueDoubleBlink() {
-#ifdef MC_SIGNAL_NEOPIXEL
-    ledVextOn();
-    // First blink
-    pixels.setPixelColor(0, pixels.Color(0, 0, 32));  // Blue
-    pixels.show();
-    delay(100);
-    pixels.clear();
-    pixels.show();
-    delay(100);
-    // Second blink
-    pixels.setPixelColor(0, pixels.Color(0, 0, 32));  // Blue
-    pixels.show();
-    delay(100);
-    pixels.clear();
-    pixels.show();
-#endif
-#ifdef MC_SIGNAL_GPIO13
-    digitalWrite(GPIO13, HIGH);
-    delay(100);
-    digitalWrite(GPIO13, LOW);
-    delay(100);
-    digitalWrite(GPIO13, HIGH);
-    delay(100);
-    digitalWrite(GPIO13, LOW);
-#endif
-}
-
-void ledOff() {
-#ifdef MC_SIGNAL_NEOPIXEL
-    pixels.clear();
-    pixels.show();
-    digitalWrite(Vext, HIGH);  // Turn off Vext to save power
-#endif
-#ifdef MC_SIGNAL_GPIO13
-    digitalWrite(GPIO13, LOW);
-#endif
-}
-
-//=============================================================================
 // Power Management
 //=============================================================================
 void applyPowerSettings() {
@@ -1013,107 +1370,6 @@ void enterLightSleep(uint8_t ms) {
 #ifdef CUBECELL
     pinMode(P4_1, INPUT);
 #endif
-}
-
-//=============================================================================
-// Configuration (EEPROM)
-//=============================================================================
-void loadConfig() {
-    EEPROM.begin(EEPROM_SIZE);
-
-    NodeConfig config;
-    EEPROM.get(0, config);
-
-    // Check if config is valid
-    if (config.magic == EEPROM_MAGIC && config.version == EEPROM_VERSION) {
-        powerSaveMode = config.powerSaveMode;
-        rxBoostEnabled = config.rxBoostEnabled;
-        deepSleepEnabled = config.deepSleepEnabled;
-
-        // Load passwords into SessionManager
-        config.adminPassword[CONFIG_PASSWORD_LEN - 1] = '\0';  // Ensure null-terminated
-        config.guestPassword[CONFIG_PASSWORD_LEN - 1] = '\0';
-        sessionManager.setAdminPassword(config.adminPassword);
-        sessionManager.setGuestPassword(config.guestPassword);
-
-        // Load daily report settings
-        reportEnabled = config.reportEnabled;
-        reportHour = config.reportHour;
-        reportMinute = config.reportMinute;
-        memcpy(reportDestPubKey, config.reportDestPubKey, REPORT_PUBKEY_SIZE);
-
-        LOG(TAG_CONFIG " Loaded from EEPROM (admin=%s, guest=%s, report=%s)\n\r",
-            strlen(config.adminPassword) > 0 ? "set" : "none",
-            strlen(config.guestPassword) > 0 ? "set" : "none",
-            reportEnabled ? "on" : "off");
-    } else {
-        // First boot or version mismatch - use defaults
-        powerSaveMode = defaultConfig.powerSaveMode;
-        rxBoostEnabled = defaultConfig.rxBoostEnabled;
-        deepSleepEnabled = defaultConfig.deepSleepEnabled;
-
-        // Set default passwords
-        sessionManager.setAdminPassword(defaultConfig.adminPassword);
-        sessionManager.setGuestPassword(defaultConfig.guestPassword);
-
-        // Set default report settings
-        reportEnabled = defaultConfig.reportEnabled;
-        reportHour = defaultConfig.reportHour;
-        reportMinute = defaultConfig.reportMinute;
-        memset(reportDestPubKey, 0, REPORT_PUBKEY_SIZE);
-
-        LOG(TAG_CONFIG " First boot, using defaults\n\r");
-        saveConfig();  // Save defaults
-    }
-}
-
-void saveConfig() {
-    NodeConfig config;
-    config.magic = EEPROM_MAGIC;
-    config.version = EEPROM_VERSION;
-    config.powerSaveMode = powerSaveMode;
-    config.rxBoostEnabled = rxBoostEnabled;
-    config.deepSleepEnabled = deepSleepEnabled;
-
-    // Save passwords from SessionManager
-    strncpy(config.adminPassword, sessionManager.getAdminPassword(), CONFIG_PASSWORD_LEN - 1);
-    config.adminPassword[CONFIG_PASSWORD_LEN - 1] = '\0';
-    strncpy(config.guestPassword, sessionManager.getGuestPassword(), CONFIG_PASSWORD_LEN - 1);
-    config.guestPassword[CONFIG_PASSWORD_LEN - 1] = '\0';
-
-    // Save daily report settings
-    config.reportEnabled = reportEnabled;
-    config.reportHour = reportHour;
-    config.reportMinute = reportMinute;
-    memcpy(config.reportDestPubKey, reportDestPubKey, REPORT_PUBKEY_SIZE);
-
-    memset(config.reserved, 0, sizeof(config.reserved));
-
-    EEPROM.put(0, config);
-    if (EEPROM.commit()) {
-        LOG(TAG_CONFIG " Saved to EEPROM\n\r");
-    } else {
-        LOG(TAG_ERROR " EEPROM write failed\n\r");
-    }
-}
-
-void resetConfig() {
-    powerSaveMode = defaultConfig.powerSaveMode;
-    rxBoostEnabled = defaultConfig.rxBoostEnabled;
-    deepSleepEnabled = defaultConfig.deepSleepEnabled;
-
-    // Reset passwords to defaults
-    sessionManager.setAdminPassword(defaultConfig.adminPassword);
-    sessionManager.setGuestPassword(defaultConfig.guestPassword);
-
-    // Reset daily report settings
-    reportEnabled = defaultConfig.reportEnabled;
-    reportHour = defaultConfig.reportHour;
-    reportMinute = defaultConfig.reportMinute;
-    memset(reportDestPubKey, 0, REPORT_PUBKEY_SIZE);
-
-    saveConfig();
-    LOG(TAG_CONFIG " Reset to factory defaults\n\r");
 }
 
 //=============================================================================
@@ -1335,6 +1591,7 @@ bool transmitPacket(MCPacket* pkt) {
     uint16_t irq = radio.getIrqStatus();
     if (irq & RADIOLIB_SX126X_IRQ_TX_DONE) {
         txCount++;
+        statsRecordTx();  // Persistent stats
         LOG(TAG_TX " Complete\n\r");
         ledOff();
         return true;
@@ -1388,6 +1645,85 @@ void sendPing() {
 // ADVERT Beacon
 //=============================================================================
 
+/**
+ * Send ADVERT without flags byte (to match buggy MeshCore firmware format)
+ * Appdata format: [name] only (no flags, no location)
+ */
+void sendAdvertNoFlags() {
+    if (!nodeIdentity.isInitialized()) {
+        LOG(TAG_ERROR " Identity not initialized\n\r");
+        return;
+    }
+
+    if (!timeSync.isSynchronized()) {
+        LOG(TAG_ERROR " Time not synchronized\n\r");
+        return;
+    }
+
+    MCPacket pkt;
+    pkt.clear();
+
+    // Set header: FLOOD + ADVERT type
+    pkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_ADVERT, MC_PAYLOAD_VER_1);
+    pkt.pathLen = 0;
+
+    uint8_t* payload = pkt.payload;
+    uint16_t pos = 0;
+
+    // [0-31] Public Key
+    memcpy(&payload[pos], nodeIdentity.getPublicKey(), MC_PUBLIC_KEY_SIZE);
+    pos += MC_PUBLIC_KEY_SIZE;
+
+    // [32-35] Timestamp
+    uint32_t timestamp = timeSync.getTimestamp();
+    payload[pos++] = timestamp & 0xFF;
+    payload[pos++] = (timestamp >> 8) & 0xFF;
+    payload[pos++] = (timestamp >> 16) & 0xFF;
+    payload[pos++] = (timestamp >> 24) & 0xFF;
+
+    // Build appdata WITHOUT flags byte - just the name
+    uint8_t appdata[32];
+    const char* name = nodeIdentity.getNodeName();
+    uint8_t nameLen = strlen(name);
+    memcpy(appdata, name, nameLen);
+    uint8_t appdataLen = nameLen;
+
+    // Calculate signature over: pubkey + timestamp + appdata
+    uint8_t signData[MC_PUBLIC_KEY_SIZE + 4 + 32];
+    uint16_t signLen = 0;
+    memcpy(&signData[signLen], nodeIdentity.getPublicKey(), MC_PUBLIC_KEY_SIZE);
+    signLen += MC_PUBLIC_KEY_SIZE;
+    memcpy(&signData[signLen], &payload[32], 4);  // timestamp
+    signLen += 4;
+    memcpy(&signData[signLen], appdata, appdataLen);
+    signLen += appdataLen;
+
+    // [36-99] Signature
+    nodeIdentity.sign(&payload[pos], signData, signLen);
+    pos += MC_SIGNATURE_SIZE;
+
+    // [100+] Appdata (just name, no flags)
+    memcpy(&payload[pos], appdata, appdataLen);
+    pos += appdataLen;
+
+    pkt.payloadLen = pos;
+
+    LOG(TAG_ADVERT " Sending ADVERT noflags (%s) ts=%lu len=%d\n\r",
+        name, timestamp, pkt.payloadLen);
+
+    uint32_t id = getPacketId(&pkt);
+    packetCache.addIfNew(id);
+
+    if (transmitPacket(&pkt)) {
+        LOG(TAG_ADVERT " Transmission successful\n\r");
+        advTxCount++;
+    } else {
+        LOG(TAG_ADVERT " Transmission failed\n\r");
+    }
+
+    startReceive();
+}
+
 void sendAdvert(bool flood) {
     if (!nodeIdentity.isInitialized()) {
         LOG(TAG_ERROR " Identity not initialized\n\r");
@@ -1428,9 +1764,112 @@ void sendAdvert(bool flood) {
 }
 
 //=============================================================================
+// Direct Message - Send encrypted message to a contact
+//=============================================================================
+#ifndef LITE_MODE
+/**
+ * Send an encrypted direct message to a contact
+ * Uses MeshCore TXT_MSG format: [dest_hash][src_hash][MAC+encrypted(timestamp+type+text)]
+ */
+void sendDirectMessage(const char* recipientName, const char* message) {
+    if (!nodeIdentity.isInitialized()) {
+        LOG(TAG_ERROR " Identity not initialized\n\r");
+        return;
+    }
+
+    if (!timeSync.isSynchronized()) {
+        LOG(TAG_ERROR " Time not synchronized - cannot send message\n\r");
+        return;
+    }
+
+    // Find contact by name
+    Contact* contact = contactMgr.findByName(recipientName);
+    if (!contact) {
+        LOG(TAG_ERROR " Contact '%s' not found\n\r", recipientName);
+        LOG(TAG_INFO " Known contacts:\n\r");
+        contactMgr.printContacts();
+        return;
+    }
+
+    LOG(TAG_INFO " Sending message to %s...\n\r", contact->name);
+
+    // Get or calculate shared secret
+    const uint8_t* sharedSecret = contactMgr.getSharedSecret(contact);
+    if (!sharedSecret) {
+        LOG(TAG_ERROR " Failed to calculate shared secret\n\r");
+        return;
+    }
+
+    // Build plaintext: [timestamp 4B][type+attempt 1B][message]
+    uint8_t plaintext[MC_MAX_MSG_PLAINTEXT];
+    uint16_t plaintextLen = 0;
+
+    // Timestamp (little-endian)
+    uint32_t timestamp = timeSync.getTimestamp();
+    plaintext[plaintextLen++] = timestamp & 0xFF;
+    plaintext[plaintextLen++] = (timestamp >> 8) & 0xFF;
+    plaintext[plaintextLen++] = (timestamp >> 16) & 0xFF;
+    plaintext[plaintextLen++] = (timestamp >> 24) & 0xFF;
+
+    // Type + attempt byte: upper 6 bits = type (0 = plain), lower 2 bits = attempt (0)
+    plaintext[plaintextLen++] = (TXT_TYPE_PLAIN << 2) | 0;
+
+    // Message text (null-terminated)
+    uint16_t msgLen = strlen(message);
+    if (msgLen > MC_MAX_MSG_PLAINTEXT - plaintextLen - 1) {
+        msgLen = MC_MAX_MSG_PLAINTEXT - plaintextLen - 1;
+    }
+    memcpy(&plaintext[plaintextLen], message, msgLen);
+    plaintextLen += msgLen;
+    plaintext[plaintextLen++] = '\0';  // Null terminator
+
+    // Encrypt with MAC
+    uint8_t encrypted[MC_MAX_MSG_ENCRYPTED];
+    uint16_t encryptedLen = msgCrypto.encryptThenMAC(sharedSecret, encrypted,
+                                                       plaintext, plaintextLen);
+    if (encryptedLen == 0) {
+        LOG(TAG_ERROR " Encryption failed\n\r");
+        return;
+    }
+
+    // Build packet
+    MCPacket pkt;
+    pkt.clear();
+
+    // Header: FLOOD + TXT_MSG type
+    pkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1);
+    pkt.pathLen = 0;
+
+    // Payload: [dest_hash 1B][src_hash 1B][MAC+ciphertext]
+    uint16_t pos = 0;
+    pkt.payload[pos++] = contact->getHash();                    // Destination hash
+    pkt.payload[pos++] = nodeIdentity.getPublicKey()[0];        // Source hash
+
+    // Copy MAC + ciphertext
+    memcpy(&pkt.payload[pos], encrypted, encryptedLen);
+    pos += encryptedLen;
+
+    pkt.payloadLen = pos;
+
+    // Transmit
+    uint32_t id = getPacketId(&pkt);
+    packetCache.addIfNew(id);
+
+    if (transmitPacket(&pkt)) {
+        LOG(TAG_OK " Message sent to %s\n\r", contact->name);
+        txCount++;
+    } else {
+        LOG(TAG_ERROR " Transmission failed\n\r");
+    }
+
+    startReceive();
+}
+#endif // LITE_MODE
+
+//=============================================================================
 // Daily Report - Send encrypted status message to admin
 //=============================================================================
-
+#ifndef LITE_MODE
 /**
  * Generate report content string
  * @param buf Output buffer
@@ -1595,6 +2034,85 @@ void checkDailyReport() {
         }
     }
 }
+#endif // LITE_MODE
+
+/**
+ * Send node alert when new node/repeater is discovered
+ * @param nodeName Name of the discovered node
+ * @param nodeHash Hash of the discovered node
+ * @param nodeType Type (1=CHAT, 2=REPEATER, etc)
+ * @param rssi Signal strength
+ * @return true if alert sent
+ */
+bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int16_t rssi) {
+    // Check if alert is enabled
+    if (!alertEnabled) return false;
+
+    // Check if we have a destination
+    bool keySet = false;
+    for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
+        if (alertDestPubKey[i] != 0) { keySet = true; break; }
+    }
+    if (!keySet) return false;
+
+    // Check if time is synced
+    if (!timeSync.isSynchronized()) return false;
+
+    // Build alert message
+    char message[64];
+    const char* typeStr = nodeType == 1 ? "CHAT" : nodeType == 2 ? "RPT" : "NODE";
+    snprintf(message, sizeof(message), "NEW %s: %s [%02X] %ddBm",
+             typeStr, nodeName[0] ? nodeName : "?", nodeHash, rssi);
+
+    // Calculate shared secret with destination
+    uint8_t sharedSecret[32];
+    if (!MeshCrypto::calcSharedSecret(sharedSecret, nodeIdentity.getPrivateKey(), alertDestPubKey)) {
+        return false;
+    }
+
+    // Encrypt the message
+    uint8_t plaintext[64];
+    uint8_t plaintextLen = 0;
+
+    // Format: [timestamp:4][text_type:1][message]
+    uint32_t timestamp = timeSync.getTimestamp();
+    plaintext[plaintextLen++] = timestamp & 0xFF;
+    plaintext[plaintextLen++] = (timestamp >> 8) & 0xFF;
+    plaintext[plaintextLen++] = (timestamp >> 16) & 0xFF;
+    plaintext[plaintextLen++] = (timestamp >> 24) & 0xFF;
+    plaintext[plaintextLen++] = (TXT_TYPE_PLAIN << 2) | 0;  // txt_type in upper 6 bits, attempt=0
+
+    uint8_t msgLen = strlen(message);
+    memcpy(&plaintext[plaintextLen], message, msgLen);
+    plaintextLen += msgLen;
+
+    // Encrypt
+    uint8_t encrypted[80];
+    uint16_t encLen = meshCrypto.encryptResponse(encrypted, plaintext, plaintextLen, sharedSecret);
+    if (encLen == 0) return false;
+
+    // Build packet
+    MCPacket pkt;
+    pkt.clear();
+    pkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1);
+    pkt.pathLen = 0;
+
+    // Payload: [dest_hash:1][src_hash:1][encrypted]
+    pkt.payload[0] = alertDestPubKey[0];  // Destination hash
+    pkt.payload[1] = nodeIdentity.getNodeHash();  // Source hash
+    memcpy(&pkt.payload[2], encrypted, encLen);
+    pkt.payloadLen = 2 + encLen;
+
+    LOG(TAG_INFO " Sending node alert to 0x%02X\n\r", alertDestPubKey[0]);
+
+    // Add to cache and queue
+    uint32_t id = getPacketId(&pkt);
+    packetCache.addIfNew(id);
+    txQueue.add(&pkt);
+    txCount++;
+
+    return true;
+}
 
 void checkAdvertBeacon() {
     // Check for pending ADVERT after time sync
@@ -1631,20 +2149,29 @@ uint32_t getPacketId(MCPacket* pkt) {
 bool shouldForward(MCPacket* pkt) {
     // Only forward flood packets
     if (!pkt->header.isFlood()) {
-        LOG(TAG_RX " Skipped (direct route, no forward)\n\r");
         return false;
+    }
+
+    // Don't forward packets specifically addressed to us
+    // ANON_REQ, REQUEST, RESPONSE all have dest_hash at payload[0]
+    uint8_t payloadType = pkt->header.getPayloadType();
+    if (payloadType == MC_PAYLOAD_ANON_REQ ||
+        payloadType == MC_PAYLOAD_REQUEST ||
+        payloadType == MC_PAYLOAD_RESPONSE) {
+        if (pkt->payloadLen > 0 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
+            // Addressed to us - don't forward
+            return false;
+        }
     }
 
     // Check packet ID cache
     uint32_t id = getPacketId(pkt);
     if (!packetCache.addIfNew(id)) {
-        LOG(TAG_RX " Skipped (duplicate ID=%08lX)\n\r", id);
         return false;
     }
 
     // Check path length (max 64 hops)
     if (pkt->pathLen >= MC_MAX_PATH_SIZE - 1) {
-        LOG(TAG_RX " Skipped (max hops reached)\n\r");
         return false;
     }
 
@@ -1773,9 +2300,7 @@ bool processDiscoverRequest(MCPacket* pkt) {
  * @return true if request processed and response sent
  */
 bool processAuthenticatedRequest(MCPacket* pkt) {
-    // Minimum: dest_hash(1) + src_hash(1) + MAC(2) + min_cipher(16) = 20
     if (pkt->payloadLen < 20) {
-        LOG(TAG_AUTH " REQUEST too short: %d bytes\n\r", pkt->payloadLen);
         return false;
     }
 
@@ -1798,7 +2323,6 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
     }
 
     if (!session) {
-        LOG(TAG_AUTH " REQUEST from unknown client %02X\n\r", srcHash);
         return false;
     }
 
@@ -1813,7 +2337,6 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
         session->sharedSecret, session->sharedSecret);
 
     if (decryptedLen == 0) {
-        LOG(TAG_AUTH " REQUEST decryption failed (bad MAC)\n\r");
         return false;
     }
 
@@ -1824,9 +2347,7 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
                          (decrypted[3] << 24);
 
     if (timestamp <= session->lastTimestamp) {
-        LOG(TAG_AUTH " REQUEST replay detected (ts=%lu <= %lu)\n\r",
-            timestamp, session->lastTimestamp);
-        return false;
+        return false;  // Replay attack
     }
     session->lastTimestamp = timestamp;
     session->lastActivity = millis();
@@ -1834,48 +2355,36 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
     // Extract request type
     uint8_t reqType = decrypted[4];
 
-    LOG(TAG_AUTH " REQUEST type=0x%02X from %02X\n\r", reqType, srcHash);
-
     // Handle request based on type
     uint8_t responseData[128];
     uint16_t responseLen = 0;
 
-    // All responses start with timestamp
-    uint32_t serverTime = timeSync.getTimestamp();
-    responseData[0] = serverTime & 0xFF;
-    responseData[1] = (serverTime >> 8) & 0xFF;
-    responseData[2] = (serverTime >> 16) & 0xFF;
-    responseData[3] = (serverTime >> 24) & 0xFF;
+    // All responses start with sender's timestamp (used as tag for matching)
+    // MeshCore reflects the request timestamp back, not server time
+    responseData[0] = timestamp & 0xFF;
+    responseData[1] = (timestamp >> 8) & 0xFF;
+    responseData[2] = (timestamp >> 16) & 0xFF;
+    responseData[3] = (timestamp >> 24) & 0xFF;
     responseLen = 4;
 
     switch (reqType) {
         case REQ_TYPE_GET_STATUS:
-            // Return core stats
-            LOG(TAG_AUTH " -> GET_STATUS\n\r");
-            responseLen += repeaterHelper.serializeCoreStats(
+            responseLen += repeaterHelper.serializeRepeaterStats(
                 &responseData[responseLen],
                 telemetry.getBatteryMv(),
-                txQueue.getCount());
+                txQueue.getCount(),
+                lastRssi, lastSnr);
             break;
 
         case REQ_TYPE_GET_TELEMETRY:
-            // Return telemetry in CayenneLPP format
-            LOG(TAG_AUTH " -> GET_TELEMETRY\n\r");
             {
                 CayenneLPP lpp(&responseData[responseLen], sizeof(responseData) - responseLen);
-                lpp.addAnalogInput(1, telemetry.getBatteryMv() / 1000.0f);
-                if (nodeIdentity.hasLocation()) {
-                    float lat = nodeIdentity.getLatitude() / 1000000.0f;
-                    float lon = nodeIdentity.getLongitude() / 1000000.0f;
-                    lpp.addGPS(2, lat, lon, 0);
-                }
+                lpp.addAnalogInput(1, (float)seenNodes.getCount());
                 responseLen += lpp.getSize();
             }
             break;
 
         case REQ_TYPE_GET_NEIGHBOURS:
-            // Return neighbour list
-            LOG(TAG_AUTH " -> GET_NEIGHBOURS\n\r");
             {
                 NeighbourTracker& neighbours = repeaterHelper.getNeighbours();
                 uint8_t count = neighbours.getCount();
@@ -1897,58 +2406,42 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
             break;
 
         case REQ_TYPE_GET_MINMAXAVG:
-            // Return radio stats
-            LOG(TAG_AUTH " -> GET_MINMAXAVG (radio stats)\n\r");
             responseLen += repeaterHelper.serializeRadioStats(&responseData[responseLen]);
             break;
 
         case REQ_TYPE_GET_ACCESS_LIST:
-            // Return ACL (admin only)
-            LOG(TAG_AUTH " -> GET_ACCESS_LIST\n\r");
-            if (session->permissions < PERM_ACL_ADMIN) {
-                LOG(TAG_AUTH " Permission denied (not admin)\n\r");
+            if (session->permissions != PERM_ACL_ADMIN) {
                 return false;
             }
             {
                 ACLManager& acl = repeaterHelper.getACL();
                 uint8_t count = acl.getCount();
                 responseData[responseLen++] = count;
-                // Entries would follow but we keep it minimal
             }
             break;
 
         case REQ_TYPE_KEEP_ALIVE:
-            // Just acknowledge with timestamp
-            LOG(TAG_AUTH " -> KEEP_ALIVE\n\r");
             break;
 
         case REQ_TYPE_SEND_CLI:
-            // Execute CLI command (admin only)
-            LOG(TAG_AUTH " -> SEND_CLI\n\r");
-            if (session->permissions < PERM_ACL_ADMIN) {
-                LOG(TAG_AUTH " Permission denied (not admin)\n\r");
+            if (session->permissions != PERM_ACL_ADMIN) {
                 return false;
             }
             {
-                // Extract command string from decrypted payload (after timestamp + type)
-                // Command starts at offset 5, null-terminated or until end of decrypted data
                 char cmdStr[64];
                 uint16_t cmdLen = decryptedLen - 5;
                 if (cmdLen > sizeof(cmdStr) - 1) cmdLen = sizeof(cmdStr) - 1;
                 memcpy(cmdStr, &decrypted[5], cmdLen);
                 cmdStr[cmdLen] = '\0';
 
-                // Remove trailing whitespace/newlines
                 while (cmdLen > 0 && (cmdStr[cmdLen-1] == '\n' || cmdStr[cmdLen-1] == '\r' ||
                        cmdStr[cmdLen-1] == ' ' || cmdStr[cmdLen-1] == '\0')) {
                     cmdStr[--cmdLen] = '\0';
                 }
 
-                LOG(TAG_AUTH " CLI cmd: '%s'\n\r", cmdStr);
-
                 // Process command and get response
-                char cliResponse[128];
-                bool isAdmin = (session->permissions >= PERM_ACL_ADMIN);
+                char cliResponse[96];  // Reduced from 128 to save stack
+                bool isAdmin = (session->permissions == PERM_ACL_ADMIN);
                 uint16_t cliLen = processRemoteCommand(cmdStr, cliResponse, sizeof(cliResponse), isAdmin);
 
                 // Append CLI response to responseData (after timestamp)
@@ -1956,8 +2449,6 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
                     memcpy(&responseData[responseLen], cliResponse, cliLen);
                     responseLen += cliLen;
                 }
-
-                LOG(TAG_AUTH " CLI response: %d bytes\n\r", cliLen);
 
                 // Handle reboot command specially
                 if (strcmp(cmdStr, "reboot") == 0) {
@@ -1969,7 +2460,6 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
             break;
 
         default:
-            LOG(TAG_AUTH " Unknown request type 0x%02X\n\r", reqType);
             return false;
     }
 
@@ -1979,7 +2469,6 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
         encryptedResponse, responseData, responseLen, session->sharedSecret);
 
     if (encLen == 0) {
-        LOG(TAG_AUTH " Failed to encrypt response\n\r");
         return false;
     }
 
@@ -1987,25 +2476,15 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
     MCPacket respPkt;
     respPkt.clear();
 
-    // Use DIRECT route for response
-    respPkt.header.set(MC_ROUTE_DIRECT, MC_PAYLOAD_RESPONSE, MC_PAYLOAD_VER_1);
-
-    // Copy return path (may need to reverse depending on implementation)
-    respPkt.pathLen = session->outPathLen;
-    if (session->outPathLen > 0) {
-        // Reverse path for return
-        for (uint8_t i = 0; i < session->outPathLen; i++) {
-            respPkt.path[i] = session->outPath[session->outPathLen - 1 - i];
-        }
-    }
+    // Use FLOOD route for response (client may not have direct path)
+    respPkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_RESPONSE, MC_PAYLOAD_VER_1);
+    respPkt.pathLen = 0;
 
     // Payload: [dest_hash:1][src_hash:1][encrypted]
     respPkt.payload[0] = srcHash;                        // Destination (client)
     respPkt.payload[1] = nodeIdentity.getNodeHash();     // Source (us)
     memcpy(&respPkt.payload[2], encryptedResponse, encLen);
     respPkt.payloadLen = 2 + encLen;
-
-    LOG(TAG_AUTH " Sending RESPONSE (type=0x%02X, len=%d)\n\r", reqType, respPkt.payloadLen);
 
     // Queue for transmission
     txQueue.add(&respPkt);
@@ -2033,12 +2512,14 @@ bool sendLoginResponse(const uint8_t* clientPubKey, const uint8_t* sharedSecret,
                        const uint8_t* outPath, uint8_t outPathLen) {
     // Build response data
     uint8_t responseData[16];
+    // Use unique timestamp (current + 1 to ensure it's always newer)
+    uint32_t responseTs = timeSync.getTimestamp() + 1;
     uint8_t responseLen = MeshCrypto::buildLoginOKResponse(
         responseData,
-        timeSync.getTimestamp(),
+        responseTs,
         isAdmin,
         permissions,
-        60,  // Keep-alive interval: 60 seconds
+        60,  // Keep-alive interval (ignored)
         2    // Firmware version: 2.x
     );
 
@@ -2048,7 +2529,6 @@ bool sendLoginResponse(const uint8_t* clientPubKey, const uint8_t* sharedSecret,
         encryptedResponse, responseData, responseLen, sharedSecret);
 
     if (encLen == 0) {
-        LOG(TAG_AUTH " Failed to encrypt response\n\r");
         return false;
     }
 
@@ -2056,23 +2536,16 @@ bool sendLoginResponse(const uint8_t* clientPubKey, const uint8_t* sharedSecret,
     MCPacket respPkt;
     respPkt.clear();
 
-    // Use DIRECT route for response (path already known)
-    respPkt.header.set(MC_ROUTE_DIRECT, MC_PAYLOAD_RESPONSE, MC_PAYLOAD_VER_1);
+    // Use FLOOD route for response (client may not have direct path)
+    // MeshCore always uses sendFlood for login responses
+    respPkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_RESPONSE, MC_PAYLOAD_VER_1);
+    respPkt.pathLen = 0;  // Flood has no path
 
-    // Copy return path (reversed)
-    respPkt.pathLen = outPathLen;
-    for (uint8_t i = 0; i < outPathLen; i++) {
-        respPkt.path[i] = outPath[outPathLen - 1 - i];
-    }
-
-    // Payload: [dest pubkey hash: 1][encrypted response]
+    // Payload: [dest_hash:1][src_hash:1][MAC:2][ciphertext]
     respPkt.payload[0] = clientPubKey[0];  // Destination hash
-    memcpy(&respPkt.payload[1], encryptedResponse, encLen);
-    respPkt.payloadLen = 1 + encLen;
-
-    // Send response
-    LOG(TAG_AUTH " Sending LOGIN_OK response (path=%d, enc=%d bytes)\n\r",
-        respPkt.pathLen, encLen);
+    respPkt.payload[1] = nodeIdentity.getNodeHash();  // Source hash (our hash)
+    memcpy(&respPkt.payload[2], encryptedResponse, encLen);
+    respPkt.payloadLen = 2 + encLen;
 
     // Queue for transmission
     txQueue.add(&respPkt);
@@ -2102,24 +2575,24 @@ bool processAnonRequest(MCPacket* pkt) {
     // Extract components (dest_hash at [0] already verified by caller)
     const uint8_t* ephemeralPub = &pkt->payload[1];     // Ephemeral pubkey at [1-32]
 
-    // Decrypt the request - pass from ephemeral pubkey onwards
-    // decryptAnonReq expects: [ephemeral:32][MAC:2][ciphertext]
+    // Decrypt the request - pass from sender pubkey onwards
+    // ANON_REQ format: [destHash:1][sender_pubkey:32][MAC:2][ciphertext]
+    // decryptAnonReq expects: [sender_pubkey:32][MAC:2][ciphertext]
+    // Note: byte[1] (7E) is first byte of sender pubkey, NOT srcHash!
     uint32_t timestamp;
     char password[32];
 
+    // Skip only destHash[0], sender pubkey starts at [1]
     uint8_t pwdLen = meshCrypto.decryptAnonReq(
         &timestamp, password, sizeof(password) - 1,
-        &pkt->payload[1],     // From ephemeral key onwards
-        pkt->payloadLen - 1,  // Length excluding dest_hash
+        &pkt->payload[1],     // From sender pubkey onwards (skip only destHash)
+        pkt->payloadLen - 1,  // Length excluding destHash
         nodeIdentity.getPrivateKey()
     );
 
     if (pwdLen == 0) {
-        LOG(TAG_AUTH " ANON_REQ decryption failed (bad MAC or format)\n\r");
         return false;
     }
-
-    LOG(TAG_AUTH " Login request: timestamp=%lu, password='%s'\n\r", timestamp, password);
 
     // Process login through session manager
     uint8_t permissions = sessionManager.processLogin(
@@ -2135,13 +2608,14 @@ bool processAnonRequest(MCPacket* pkt) {
     memset(password, 0, sizeof(password));
 
     if (permissions == 0) {
-        LOG(TAG_AUTH " Login " ANSI_RED "FAILED" ANSI_RESET " - invalid password or replay\n\r");
+        statsRecordLoginFail();  // Persistent stats
+        LOG(TAG_AUTH " Login FAILED\n\r");
         return false;
     }
 
+    statsRecordLogin();  // Persistent stats
     bool isAdmin = (permissions == PERM_ACL_ADMIN);
-    LOG(TAG_AUTH " Login " ANSI_GREEN "OK" ANSI_RESET " - %s access granted\n\r",
-        isAdmin ? "ADMIN" : "GUEST");
+    LOG(TAG_AUTH " Login OK (%s)\n\r", isAdmin ? "admin" : "guest");
 
     // Capture admin public key for daily report
     if (isAdmin) {
@@ -2155,14 +2629,12 @@ bool processAnonRequest(MCPacket* pkt) {
         if (isNewKey || keyEmpty) {
             memcpy(reportDestPubKey, ephemeralPub, REPORT_PUBKEY_SIZE);
             saveConfig();
-            LOG(TAG_AUTH " Admin pubkey captured for daily report\n\r");
         }
     }
 
     // Get shared secret from session for response encryption
     ClientSession* session = sessionManager.findSession(ephemeralPub);
     if (!session) {
-        LOG(TAG_AUTH " Session not found after login\n\r");
         return false;
     }
 
@@ -2179,6 +2651,7 @@ bool processAnonRequest(MCPacket* pkt) {
 
 void processReceivedPacket(MCPacket* pkt) {
     rxCount++;
+    statsRecordRx();  // Persistent stats
 
     // Update repeater statistics
     bool isFlood = pkt->header.isFlood();
@@ -2194,34 +2667,43 @@ void processReceivedPacket(MCPacket* pkt) {
         pkt->pathLen, pkt->payloadLen,
         pkt->rssi, pkt->snr / 4, abs(pkt->snr % 4) * 25);
 
-    // Handle ANON_REQ (login request) - must be addressed to us
-    // Format: [dest_hash:1][ephemeral_pub:32][MAC:2][ciphertext]
+    // Handle ANON_REQ (login request)
     if (pkt->header.getPayloadType() == MC_PAYLOAD_ANON_REQ) {
-        // Min size: 1 (dest_hash) + 32 (ephemeral) + 2 (MAC) + 16 (min block)
-        if (pkt->payloadLen >= 51) {
-            // Check destination hash (first byte = dest_hash)
-            uint8_t destHash = pkt->payload[0];
-            if (destHash == nodeIdentity.getNodeHash()) {
-                LOG(TAG_AUTH " Received ANON_REQ addressed to us (hash=%02X)\n\r", destHash);
+        if (pkt->payloadLen >= 51 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
+            // Rate limit login attempts
+            if (!repeaterHelper.allowLogin()) {
+                statsRecordRateLimited();  // Persistent stats
+                LOG(TAG_AUTH " Login rate limited\n\r");
+            } else {
                 processAnonRequest(pkt);
             }
         }
     }
-    // Handle REQUEST (authenticated request from logged-in client)
-    // Format: [dest_hash:1][src_hash:1][MAC:2][ciphertext]
+    // Handle REQUEST (authenticated request)
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_REQUEST) {
-        if (pkt->payloadLen >= 20) {
-            uint8_t destHash = pkt->payload[0];
-            if (destHash == nodeIdentity.getNodeHash()) {
+        if (pkt->payloadLen >= 20 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
+            // Rate limit requests
+            if (!repeaterHelper.allowRequest()) {
+                statsRecordRateLimited();  // Persistent stats
+                LOG(TAG_AUTH " Request rate limited\n\r");
+            } else {
                 processAuthenticatedRequest(pkt);
             }
         }
     }
     // Handle CONTROL (node discovery, etc.)
-    // Format: [flags:1][type_filter:1][tag:4][since:4(optional)]
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_CONTROL) {
         if (pkt->payloadLen >= 6) {
             processDiscoverRequest(pkt);
+        }
+    }
+    // Handle TRACE (ping) - add our SNR and forward
+    else if (pkt->header.getPayloadType() == MC_PAYLOAD_PATH_TRACE) {
+        // Add our SNR to the path (SNR * 4 as signed byte)
+        if (pkt->pathLen < MC_MAX_PATH_SIZE) {
+            pkt->path[pkt->pathLen++] = (int8_t)(pkt->snr);
+            // Forward the trace packet
+            txQueue.add(pkt);
         }
     }
     // Parse and display ADVERT info
@@ -2230,6 +2712,20 @@ void processReceivedPacket(MCPacket* pkt) {
         // Try to sync time from ADVERT timestamp
         // First ADVERT: sync immediately. Already synced: need 2 matching different times to re-sync
         uint32_t advertTime = AdvertGenerator::extractTimestamp(pkt->payload, pkt->payloadLen);
+
+        #ifdef DEBUG_VERBOSE
+        // Debug: show raw timestamp bytes from received ADVERT
+        Serial.printf("[RX-ADV] Raw ts bytes[32-35]: %02X %02X %02X %02X -> unix=%lu\n\r",
+                      pkt->payload[32], pkt->payload[33], pkt->payload[34], pkt->payload[35], advertTime);
+
+        // Debug: show appdata (starts at byte 100)
+        Serial.printf("[RX-ADV] Appdata[100+]: ");
+        for (int i = 100; i < pkt->payloadLen && i < 116; i++) {
+            Serial.printf("%02X ", pkt->payload[i]);
+        }
+        Serial.printf(" (len=%d)\n\r", pkt->payloadLen - 100);
+        #endif
+
         if (advertTime > 0) {
             uint8_t syncResult = timeSync.syncFromAdvert(advertTime);
 
@@ -2237,6 +2733,7 @@ void processReceivedPacket(MCPacket* pkt) {
                 // First sync - use immediately
                 ledBlueDoubleBlink();  // Signal time sync acquired
                 LOG(TAG_OK " " ANSI_GREEN "Time synchronized!" ANSI_RESET " Unix: %lu\n\r", timeSync.getTimestamp());
+                statsSetFirstBootTime(timeSync.getTimestamp());  // Persistent stats
                 // Schedule our own ADVERT after sync
                 pendingAdvertTime = millis() + ADVERT_AFTER_SYNC_MS;
                 LOG(TAG_INFO " Will send ADVERT in %d seconds\n\r", ADVERT_AFTER_SYNC_MS / 1000);
@@ -2272,16 +2769,25 @@ void processReceivedPacket(MCPacket* pkt) {
             // Update seen nodes with pubkey hash and name from ADVERT
             bool isNew = seenNodes.update(advInfo.pubKeyHash, pkt->rssi, pkt->snr, advInfo.name);
             if (isNew) {
+                statsRecordUniqueNode();  // Persistent stats
                 LOG(TAG_NODE " New node discovered via ADVERT\n\r");
+                // Send alert for new node
+                uint8_t nodeType = advInfo.isChatNode ? 1 : advInfo.isRepeater ? 2 : 0;
+                sendNodeAlert(advInfo.name, advInfo.pubKeyHash, nodeType, pkt->rssi);
             }
 
-            // If this is a repeater, add to neighbours list (full pubkey available)
-            if (advInfo.isRepeater && pkt->payloadLen >= 32) {
+            // Add to contact manager (stores full public key for messaging)
+            const uint8_t* pubKey = &pkt->payload[ADVERT_PUBKEY_OFFSET];
+            contactMgr.updateFromAdvert(pubKey, advInfo.name, pkt->rssi, pkt->snr);
+
+            // If this is a repeater AND received directly (0-hop), add to neighbours list
+            // Only 0-hop ADVERTs indicate direct neighbours (no relay)
+            if (advInfo.isRepeater && pkt->pathLen == 0 && pkt->payloadLen >= 32) {
                 bool newNeighbour = repeaterHelper.getNeighbours().update(
                     pkt->payload,  // First 32 bytes are pubkey
                     pkt->snr, pkt->rssi);
                 if (newNeighbour) {
-                    LOG(TAG_NODE " New neighbour repeater added\n\r");
+                    LOG(TAG_NODE " New direct neighbour: %s (0-hop)\n\r", advInfo.name);
                 }
             }
         }
@@ -2291,6 +2797,7 @@ void processReceivedPacket(MCPacket* pkt) {
         // First byte is originator
         bool isNew = seenNodes.update(pkt->path[0], pkt->rssi, pkt->snr);
         if (isNew) {
+            statsRecordUniqueNode();  // Persistent stats
             LOG(TAG_NODE " New relay node detected: %02X\n\r", pkt->path[0]);
         }
         // If path has multiple hops, also track the last hop (direct neighbor)
@@ -2311,21 +2818,29 @@ void processReceivedPacket(MCPacket* pkt) {
         hash = (hash & 0x7F) | 0x80;
         bool isNew = seenNodes.update(hash, pkt->rssi, pkt->snr);
         if (isNew) {
+            statsRecordUniqueNode();  // Persistent stats
             LOG(TAG_NODE " New direct node detected: %02X\n\r", hash);
         }
     }
 
     // Check if we should forward
     if (shouldForward(pkt)) {
-        // Add our node hash to path (simplified: just add a byte)
-        uint8_t myHash = (nodeId >> 24) ^ (nodeId >> 16) ^
-                         (nodeId >> 8) ^ nodeId;
-        pkt->path[pkt->pathLen++] = myHash;
+        // Rate limit forwarding
+        if (!repeaterHelper.allowForward()) {
+            statsRecordRateLimited();  // Persistent stats
+            LOG(TAG_FWD " Forward rate limited\n\r");
+        } else {
+            // Add our node hash to path (simplified: just add a byte)
+            uint8_t myHash = (nodeId >> 24) ^ (nodeId >> 16) ^
+                             (nodeId >> 8) ^ nodeId;
+            pkt->path[pkt->pathLen++] = myHash;
 
-        // Add to TX queue
-        txQueue.add(pkt);
-        fwdCount++;
-        LOG(TAG_FWD " Queued for relay (path=%d)\n\r", pkt->pathLen);
+            // Add to TX queue
+            txQueue.add(pkt);
+            fwdCount++;
+            statsRecordFwd();  // Persistent stats
+            LOG(TAG_FWD " Queued for relay (path=%d)\n\r", pkt->pathLen);
+        }
     }
 }
 
@@ -2347,6 +2862,9 @@ void setup() {
 
     // Load configuration from EEPROM
     loadConfig();
+
+    // Load persistent statistics
+    loadPersistentStats();
 
     // Enable watchdog
 #if MC_WATCHDOG_ENABLED && defined(CUBECELL)
@@ -2384,6 +2902,10 @@ void setup() {
     // Initialize repeater helper
     repeaterHelper.begin(&nodeIdentity);
     LOG(TAG_INFO " Repeater helper initialized\n\r");
+
+    // Initialize contact manager for direct messaging
+    contactMgr.begin(&nodeIdentity);
+    LOG(TAG_INFO " Contact manager initialized\n\r");
 
     initLed();
     packetCache.clear();
@@ -2508,8 +3030,13 @@ void loop() {
     // Check ADVERT beacon timer
     checkAdvertBeacon();
 
+    // Check if persistent stats need auto-save
+    checkStatsSave();
+
+#ifndef LITE_MODE
     // Check daily report scheduler
     checkDailyReport();
+#endif
 
     // Power saving when idle
     if (txQueue.getCount() == 0 && !dio1Flag) {
