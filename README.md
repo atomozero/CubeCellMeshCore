@@ -12,12 +12,13 @@ MeshCore-compatible repeater firmware for Heltec CubeCell HTCC-AB01.
 - **Low Power** - Deep sleep support with duty-cycle RX
 - **Telemetry** - Battery voltage, node statistics
 - **Neighbour Tracking** - Direct repeater discovery via 0-hop ADVERTs
+- **Rate Limiting** - Protection against flood/spam attacks
 
 ## Hardware
 
 - **Board**: Heltec CubeCell HTCC-AB01
 - **Radio**: SX1262 LoRa transceiver
-- **Flash**: 131KB (94.1% used)
+- **Flash**: 131KB (94.8% used)
 - **RAM**: 16KB (49.4% used)
 
 ## Quick Start
@@ -193,6 +194,13 @@ MIT License - See LICENSE file for details.
 - [RadioLib](https://github.com/jgromes/RadioLib) - LoRa library
 
 ## Changelog
+
+### v0.3.2 (2026-01-23)
+- Added rate limiting for login, request, and forwarding
+- Protection against brute-force login attacks (5/min)
+- Protection against request spam (30/min)
+- Protection against network flooding (100/min forward)
+- New serial command: `ratelimit [on|off|reset]`
 
 ### v0.3.1 (2026-01-23)
 - Added neighbour tracking for direct (0-hop) repeater ADVERTs

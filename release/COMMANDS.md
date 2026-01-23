@@ -1,4 +1,4 @@
-# CubeCellMeshCore v0.3.1 - Command Reference
+# CubeCellMeshCore v0.3.2 - Command Reference
 
 Serial console at 115200 baud.
 
@@ -56,6 +56,20 @@ Serial console at 115200 baud.
 | `sleep off` | Disable deep sleep mode |
 | `rxboost on` | Enable RX gain boost |
 | `rxboost off` | Disable RX gain boost |
+
+## Security Commands
+
+| Command | Description |
+|---------|-------------|
+| `ratelimit` | Show rate limiter status and stats |
+| `ratelimit on` | Enable rate limiting |
+| `ratelimit off` | Disable rate limiting |
+| `ratelimit reset` | Reset rate limiter statistics |
+
+### Rate Limits (default)
+- **Login**: 5 attempts per minute (brute-force protection)
+- **Request**: 30 requests per minute (spam protection)
+- **Forward**: 100 packets per minute (flood protection)
 
 ## Debug Commands
 
