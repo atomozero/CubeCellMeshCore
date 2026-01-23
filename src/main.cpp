@@ -2354,21 +2354,12 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
             break;
 
         case REQ_TYPE_GET_TELEMETRY:
-            // Return telemetry in MeshCore CayenneLPP format
+            // Return node count as analog input
             LOG(TAG_AUTH " -> GET_TELEMETRY\n\r");
             {
-                // Update battery reading before responding
-                telemetry.update();
-
                 CayenneLPP lpp(&responseData[responseLen], sizeof(responseData) - responseLen);
-                // Use LPP_VOLTAGE (116) for MeshCore compatibility
-                // Channel 1 = TELEM_CHANNEL_SELF
-                lpp.addVoltage(1, telemetry.getBatteryMv() / 1000.0f);
-                if (nodeIdentity.hasLocation()) {
-                    float lat = nodeIdentity.getLatitude() / 1000000.0f;
-                    float lon = nodeIdentity.getLongitude() / 1000000.0f;
-                    lpp.addGPS(2, lat, lon, 0);
-                }
+                // Channel 1: Number of seen nodes (as analog value)
+                lpp.addAnalogInput(1, (float)seenNodes.getCount());
                 responseLen += lpp.getSize();
             }
             break;
