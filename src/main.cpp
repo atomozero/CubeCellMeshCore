@@ -2638,10 +2638,18 @@ void processReceivedPacket(MCPacket* pkt) {
         }
     }
     // Handle CONTROL (node discovery, etc.)
-    // Format: [flags:1][type_filter:1][tag:4][since:4(optional)]
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_CONTROL) {
         if (pkt->payloadLen >= 6) {
             processDiscoverRequest(pkt);
+        }
+    }
+    // Handle TRACE (ping) - add our SNR and forward
+    else if (pkt->header.getPayloadType() == MC_PAYLOAD_PATH_TRACE) {
+        // Add our SNR to the path (SNR * 4 as signed byte)
+        if (pkt->pathLen < MC_MAX_PATH_SIZE) {
+            pkt->path[pkt->pathLen++] = (int8_t)(pkt->snr);
+            // Forward the trace packet
+            txQueue.add(pkt);
         }
     }
     // Parse and display ADVERT info

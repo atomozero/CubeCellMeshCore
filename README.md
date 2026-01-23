@@ -16,7 +16,7 @@ MeshCore-compatible repeater firmware for Heltec CubeCell HTCC-AB01.
 
 - **Board**: Heltec CubeCell HTCC-AB01
 - **Radio**: SX1262 LoRa transceiver
-- **Flash**: 131KB (97.9% used)
+- **Flash**: 131KB (94.1% used)
 - **RAM**: 16KB (49.4% used)
 
 ## Quick Start
@@ -192,10 +192,23 @@ MIT License - See LICENSE file for details.
 
 ## Changelog
 
-### v1.0.0 (2026-01-22)
+### v0.3.0 (2026-01-23)
+- Fixed MeshCore login protocol compatibility
+- Fixed telemetry response format (CayenneLPP with LPP_VOLTAGE)
+- Added TRACE packet support for ping functionality
+- Improved packet routing (don't forward packets addressed to us)
+- Reduced debug output and Flash usage (94.1%)
+- Telemetry now reports node count
+
+### v0.2.x (2026-01-22)
+- Authentication system with Ed25519 key exchange
+- AES-128-ECB encrypted session support
+- Remote CLI commands via mesh network
+- Node discovery and tracking
+
+### v0.1.0 (2026-01-22)
 - Initial release
 - MeshCore-compatible ADVERT packets
 - Ed25519 signatures working
 - Packet forwarding with CSMA/CA
 - Serial console commands
-- Remote CLI support
