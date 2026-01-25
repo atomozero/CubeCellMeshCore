@@ -425,60 +425,19 @@ void processCommand(char* cmd) {
 // Full command handler with ANSI formatting
 void processCommand(char* cmd) {
     if (strcmp(cmd, "status") == 0) {
-        LOG_RAW("\n\r");
-        LOG_RAW(ANSI_CYAN "┌────────────────────────────────┐\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE "        SYSTEM STATUS          " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤" ANSI_RESET "\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Firmware    " ANSI_GREEN "v%-16s" ANSI_RESET ANSI_CYAN "│\n\r", FIRMWARE_VERSION);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Node ID     " ANSI_YELLOW "%-16lX" ANSI_RESET ANSI_CYAN "│\n\r", nodeId);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Identity    " ANSI_YELLOW "%-16s" ANSI_RESET ANSI_CYAN "│\n\r", nodeIdentity.getNodeName());
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤\n\r");
-        char freqStr[18]; snprintf(freqStr, sizeof(freqStr), "%.3f MHz", MC_FREQUENCY);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Frequency   " ANSI_CYAN "%-16s" ANSI_RESET ANSI_CYAN "│\n\r", freqStr);
-        char bwStr[18]; snprintf(bwStr, sizeof(bwStr), "%.1f kHz", MC_BANDWIDTH);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Bandwidth   " ANSI_CYAN "%-16s" ANSI_RESET ANSI_CYAN "│\n\r", bwStr);
-        char sfStr[18]; snprintf(sfStr, sizeof(sfStr), "SF%d", MC_SPREADING);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Spreading   " ANSI_CYAN "%-16s" ANSI_RESET ANSI_CYAN "│\n\r", sfStr);
-        char crStr[18]; snprintf(crStr, sizeof(crStr), "4/%d", MC_CODING_RATE);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Coding Rate " ANSI_CYAN "%-16s" ANSI_RESET ANSI_CYAN "│\n\r", crStr);
-        char pwrStr[18]; snprintf(pwrStr, sizeof(pwrStr), "%d dBm", MC_TX_POWER);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " TX Power    " ANSI_CYAN "%-16s" ANSI_RESET ANSI_CYAN "│\n\r", pwrStr);
-        LOG_RAW(ANSI_CYAN "└────────────────────────────────┘" ANSI_RESET "\n\r");
+        LOG(TAG_SYSTEM " v%s | ID:%lX | %s\n\r", FIRMWARE_VERSION, nodeId, nodeIdentity.getNodeName());
+        LOG(TAG_RADIO " %.1fMHz BW%.0f SF%d CR4/%d %ddBm\n\r", MC_FREQUENCY, MC_BANDWIDTH, MC_SPREADING, MC_CODING_RATE, MC_TX_POWER);
     }
     else if (strcmp(cmd, "stats") == 0) {
-        LOG_RAW("\n\r");
-        LOG_RAW(ANSI_CYAN "┌────────────────────────────────┐\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE "          STATISTICS           " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤" ANSI_RESET "\n\r");
-        LOG_RAW(ANSI_CYAN "│ " ANSI_GREEN "RX " ANSI_WHITE " Received    %-14lu" ANSI_RESET ANSI_CYAN "│\n\r", rxCount);
-        LOG_RAW(ANSI_CYAN "│ " ANSI_MAGENTA "TX " ANSI_WHITE " Transmitted %-14lu" ANSI_RESET ANSI_CYAN "│\n\r", txCount);
-        LOG_RAW(ANSI_CYAN "│ " ANSI_BLUE "FWD" ANSI_WHITE " Forwarded   %-14lu" ANSI_RESET ANSI_CYAN "│\n\r", fwdCount);
-        LOG_RAW(ANSI_CYAN "│ " ANSI_RED "ERR" ANSI_WHITE " Errors      %-14lu" ANSI_RESET ANSI_CYAN "│\n\r", errCount);
-        LOG_RAW(ANSI_CYAN "│ " ANSI_RED "CRC" ANSI_WHITE " CRC Errors  %-14lu" ANSI_RESET ANSI_CYAN "│\n\r", crcErrCount);
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤\n\r");
-        LOG_RAW(ANSI_CYAN "│ " ANSI_YELLOW "ADV" ANSI_WHITE " TX: %-6lu RX: %-6lu  " ANSI_RESET ANSI_CYAN "│\n\r", advTxCount, advRxCount);
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Queue        " ANSI_CYAN "%d / %d            " ANSI_RESET ANSI_CYAN "│\n\r", txQueue.getCount(), MC_TX_QUEUE_SIZE);
-        LOG_RAW(ANSI_CYAN "└────────────────────────────────┘" ANSI_RESET "\n\r");
+        LOG(TAG_INFO " RX:%lu TX:%lu FWD:%lu ERR:%lu CRC:%lu\n\r", rxCount, txCount, fwdCount, errCount, crcErrCount);
+        LOG(TAG_ADVERT " TX:%lu RX:%lu | Queue:%d/%d\n\r", advTxCount, advRxCount, txQueue.getCount(), MC_TX_QUEUE_SIZE);
     }
     else if (strcmp(cmd, "rssi") == 0) {
-        LOG_RAW(ANSI_CYAN "┌────────────────────────────────┐\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " RSSI: " ANSI_GREEN "%4d" ANSI_WHITE " dBm  SNR: " ANSI_GREEN "%2d.%02d" ANSI_WHITE " dB  " ANSI_RESET ANSI_CYAN "│\n\r",
-            lastRssi, lastSnr / 4, abs(lastSnr % 4) * 25);
-        LOG_RAW(ANSI_CYAN "└────────────────────────────────┘" ANSI_RESET "\n\r");
+        LOG(TAG_RADIO " RSSI:%ddBm SNR:%d.%02ddB\n\r", lastRssi, lastSnr / 4, abs(lastSnr % 4) * 25);
     }
     else if (strcmp(cmd, "power") == 0) {
-        LOG_RAW("\n\r");
-        LOG_RAW(ANSI_CYAN "┌────────────────────────────────┐\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE "        POWER SETTINGS         " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤" ANSI_RESET "\n\r");
-        const char* modeStr = powerSaveMode == 0 ? "Performance" : powerSaveMode == 1 ? "Balanced" : "PowerSave";
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Mode        " ANSI_YELLOW "%-16s" ANSI_RESET ANSI_CYAN "│\n\r", modeStr);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " RX Boost    %s%-16s" ANSI_RESET ANSI_CYAN "│\n\r",
-            rxBoostEnabled ? ANSI_GREEN : ANSI_RED, rxBoostEnabled ? "ON" : "OFF");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Deep Sleep  %s%-16s" ANSI_RESET ANSI_CYAN "│\n\r",
-            deepSleepEnabled ? ANSI_GREEN : ANSI_RED, deepSleepEnabled ? "ON" : "OFF");
-        LOG_RAW(ANSI_CYAN "└────────────────────────────────┘" ANSI_RESET "\n\r");
+        const char* modeStr = powerSaveMode == 0 ? "Perf" : powerSaveMode == 1 ? "Bal" : "Save";
+        LOG(TAG_INFO " Mode:%s RxBoost:%s DeepSleep:%s\n\r", modeStr, rxBoostEnabled ? "ON" : "OFF", deepSleepEnabled ? "ON" : "OFF");
     }
     else if (strcmp(cmd, "rxboost on") == 0) {
         rxBoostEnabled = true;
@@ -635,37 +594,14 @@ void processCommand(char* cmd) {
         }
     }
     else if (strcmp(cmd, "identity") == 0) {
-        LOG_RAW("\n\r");
-        LOG_RAW(ANSI_CYAN "┌────────────────────────────────┐\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE "        NODE IDENTITY          " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤" ANSI_RESET "\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Name        " ANSI_YELLOW "%-16s" ANSI_RESET ANSI_CYAN "│\n\r", nodeIdentity.getNodeName());
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Hash        " ANSI_YELLOW "0x%02X            " ANSI_RESET ANSI_CYAN "│\n\r", nodeIdentity.getNodeHash());
         const uint8_t* pk = nodeIdentity.getPublicKey();
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " PubKey      " ANSI_DIM "%02X%02X%02X%02X..      " ANSI_RESET ANSI_CYAN "│\n\r",
-                 pk[0], pk[1], pk[2], pk[3]);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Flags       " ANSI_CYAN "0x%02X            " ANSI_RESET ANSI_CYAN "│\n\r", nodeIdentity.getFlags());
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤\n\r");
+        LOG(TAG_NODE " %s Hash:0x%02X Flags:0x%02X\n\r", nodeIdentity.getNodeName(), nodeIdentity.getNodeHash(), nodeIdentity.getFlags());
+        LOG(TAG_INFO " PubKey:%02X%02X%02X%02X...\n\r", pk[0], pk[1], pk[2], pk[3]);
         if (nodeIdentity.hasLocation()) {
-            char locStr[20];
-            snprintf(locStr, sizeof(locStr), "%.4f,%.4f",
-                     nodeIdentity.getLatitudeFloat(), nodeIdentity.getLongitudeFloat());
-            LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Location    " ANSI_GREEN "%-16s" ANSI_RESET ANSI_CYAN "│\n\r", locStr);
-        } else {
-            LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Location    " ANSI_RED "not set         " ANSI_RESET ANSI_CYAN "│\n\r");
+            LOG(TAG_INFO " Loc:%.4f,%.4f\n\r", nodeIdentity.getLatitudeFloat(), nodeIdentity.getLongitudeFloat());
         }
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " ADVERT Int  " ANSI_GREEN "%-14lus  " ANSI_RESET ANSI_CYAN "│\n\r", advertGen.getInterval() / 1000);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Next in     " ANSI_YELLOW "%-14lus  " ANSI_RESET ANSI_CYAN "│\n\r", advertGen.getTimeUntilNext());
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤\n\r");
-        if (timeSync.isSynchronized()) {
-            LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Time        " ANSI_GREEN "synced          " ANSI_RESET ANSI_CYAN "│\n\r");
-        } else if (timeSync.hasPendingSync()) {
-            LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Time        " ANSI_YELLOW "pending (1/2)   " ANSI_RESET ANSI_CYAN "│\n\r");
-        } else {
-            LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Time        " ANSI_RED "not synced      " ANSI_RESET ANSI_CYAN "│\n\r");
-        }
-        LOG_RAW(ANSI_CYAN "└────────────────────────────────┘" ANSI_RESET "\n\r");
+        LOG(TAG_ADVERT " Int:%lus Next:%lus\n\r", advertGen.getInterval() / 1000, advertGen.getTimeUntilNext());
+        LOG(TAG_INFO " Time:%s\n\r", timeSync.isSynchronized() ? "synced" : timeSync.hasPendingSync() ? "pending" : "not synced");
     }
     else if (strcmp(cmd, "identity reset") == 0) {
         LOG(TAG_WARN " Generating new identity...\n\r");
@@ -752,84 +688,36 @@ void processCommand(char* cmd) {
         const TelemetryData* t = telemetry.getData();
         char uptimeStr[32];
         telemetry.formatUptime(uptimeStr, sizeof(uptimeStr));
-
-        LOG_RAW("\n\r");
-        LOG_RAW(ANSI_CYAN "┌────────────────────────────────┐\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE "          TELEMETRY            " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤" ANSI_RESET "\n\r");
-        // Battery with color based on level
-        uint8_t batPct = telemetry.getBatteryPercent();
-        const char* batColor = batPct > 50 ? ANSI_GREEN : batPct > 20 ? ANSI_YELLOW : ANSI_RED;
-        char batStr[20]; snprintf(batStr, sizeof(batStr), "%dmV (%d%%)", t->batteryMv, batPct);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Battery     %s%-16s" ANSI_RESET ANSI_CYAN "│\n\r", batColor, batStr);
-        char tempStr[16]; snprintf(tempStr, sizeof(tempStr), "%dC", t->temperature);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Temperature " ANSI_CYAN "%-16s" ANSI_RESET ANSI_CYAN "│\n\r", tempStr);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Uptime      " ANSI_WHITE "%-16s" ANSI_RESET ANSI_CYAN "│\n\r", uptimeStr);
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤\n\r");
-        LOG_RAW(ANSI_CYAN "│ " ANSI_GREEN "RX " ANSI_WHITE "%-8lu " ANSI_MAGENTA "TX " ANSI_WHITE "%-8lu   " ANSI_RESET ANSI_CYAN "│\n\r", t->rxCount, t->txCount);
-        LOG_RAW(ANSI_CYAN "│ " ANSI_BLUE "FWD" ANSI_WHITE " %-8lu " ANSI_RED "ERR" ANSI_WHITE " %-8lu   " ANSI_RESET ANSI_CYAN "│\n\r", t->fwdCount, t->errorCount);
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤\n\r");
-        char rssiStr[24]; snprintf(rssiStr, sizeof(rssiStr), "%ddBm / %d.%02ddB",
-            t->lastRssi, t->lastSnr / 4, abs(t->lastSnr % 4) * 25);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " RSSI/SNR    " ANSI_GREEN "%-16s" ANSI_RESET ANSI_CYAN "│\n\r", rssiStr);
-        LOG_RAW(ANSI_CYAN "└────────────────────────────────┘" ANSI_RESET "\n\r");
+        LOG(TAG_INFO " Bat:%dmV(%d%%) Temp:%dC Up:%s\n\r", t->batteryMv, telemetry.getBatteryPercent(), t->temperature, uptimeStr);
+        LOG(TAG_INFO " RX:%lu TX:%lu FWD:%lu ERR:%lu\n\r", t->rxCount, t->txCount, t->fwdCount, t->errorCount);
+        LOG(TAG_RADIO " RSSI:%ddBm SNR:%d.%02ddB\n\r", t->lastRssi, t->lastSnr / 4, abs(t->lastSnr % 4) * 25);
     }
     else if (strcmp(cmd, "nodes") == 0) {
-        LOG_RAW("\n\r");
-        LOG_RAW(ANSI_CYAN "┌────────────────────────────────────────────────────────┐\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE " SEEN NODES: %-2d                                        " ANSI_RESET ANSI_CYAN "│\n\r", seenNodes.getCount());
-        LOG_RAW(ANSI_CYAN "├──────┬────────────┬─────────┬─────────┬──────┬────────┤\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Hash " ANSI_CYAN "│" ANSI_WHITE "   Name     " ANSI_CYAN "│" ANSI_WHITE "  RSSI   " ANSI_CYAN "│" ANSI_WHITE "   SNR   " ANSI_CYAN "│" ANSI_WHITE " Pkts " ANSI_CYAN "│" ANSI_WHITE "   Ago  " ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├──────┼────────────┼─────────┼─────────┼──────┼────────┤" ANSI_RESET "\n\r");
-        if (seenNodes.getCount() == 0) {
-            LOG_RAW(ANSI_CYAN "│" ANSI_DIM "              No nodes detected yet                    " ANSI_RESET ANSI_CYAN "│\n\r");
-        } else {
-            for (uint8_t i = 0; i < seenNodes.getCount(); i++) {
-                const SeenNode* n = seenNodes.getNode(i);
-                if (n) {
-                    uint32_t ago = (millis() - n->lastSeen) / 1000;
-                    // Display name if available, otherwise show hash-based ID
-                    char nameStr[12];
-                    if (n->name[0] != '\0') {
-                        strncpy(nameStr, n->name, sizeof(nameStr) - 1);
-                        nameStr[sizeof(nameStr) - 1] = '\0';
-                    } else {
-                        snprintf(nameStr, sizeof(nameStr), "Node-%02X", n->hash);
-                    }
-                    LOG_RAW(ANSI_CYAN "│" ANSI_YELLOW "  %02X  " ANSI_RESET ANSI_CYAN "│" ANSI_GREEN " %-10s " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %4ddBm " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %2d.%02ddB " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %4d " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %5lus " ANSI_RESET ANSI_CYAN "│\n\r",
-                        n->hash, nameStr, n->lastRssi,
-                        n->lastSnr / 4, abs(n->lastSnr % 4) * 25,
-                        n->pktCount, ago);
-                }
+        LOG(TAG_NODE " Seen:%d\n\r", seenNodes.getCount());
+        for (uint8_t i = 0; i < seenNodes.getCount(); i++) {
+            const SeenNode* n = seenNodes.getNode(i);
+            if (n) {
+                uint32_t ago = (millis() - n->lastSeen) / 1000;
+                const char* name = n->name[0] ? n->name : "?";
+                LOG(TAG_NODE " %02X %s %ddBm %d.%02ddB p:%d %lus\n\r",
+                    n->hash, name, n->lastRssi, n->lastSnr / 4, abs(n->lastSnr % 4) * 25, n->pktCount, ago);
             }
         }
-        LOG_RAW(ANSI_CYAN "└──────┴────────────┴─────────┴─────────┴──────┴────────┘" ANSI_RESET "\n\r");
     }
     // ==================== REPEATER COMMANDS ====================
     else if (strcmp(cmd, "neighbours") == 0 || strcmp(cmd, "neighbors") == 0) {
-        LOG_RAW("\n\r");
-        LOG_RAW(ANSI_CYAN "┌────────────────────────────────────────┐\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE "          NEIGHBOUR REPEATERS          " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├──────────────┬─────────┬─────────┬─────┤" ANSI_RESET "\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE "  PubKey     " ANSI_CYAN "│" ANSI_WHITE "  RSSI   " ANSI_CYAN "│" ANSI_WHITE "   SNR   " ANSI_CYAN "│" ANSI_WHITE " Age " ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├──────────────┼─────────┼─────────┼─────┤" ANSI_RESET "\n\r");
-
         uint8_t cnt = repeaterHelper.getNeighbours().getCount();
-        if (cnt == 0) {
-            LOG_RAW(ANSI_CYAN "│" ANSI_DIM "      No neighbours detected          " ANSI_RESET ANSI_CYAN "│\n\r");
-        } else {
-            for (uint8_t i = 0; i < cnt && i < 20; i++) {
-                const NeighbourInfo* n = repeaterHelper.getNeighbours().getNeighbour(i);
-                if (n) {
-                    uint32_t ago = (millis() - n->lastHeard) / 1000;
-                    LOG_RAW(ANSI_CYAN "│" ANSI_YELLOW " %02X%02X%02X%02X%02X%02X " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %4ddBm " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %2d.%02ddB " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE "%4lus" ANSI_RESET ANSI_CYAN "│\n\r",
-                        n->pubKeyPrefix[0], n->pubKeyPrefix[1], n->pubKeyPrefix[2],
-                        n->pubKeyPrefix[3], n->pubKeyPrefix[4], n->pubKeyPrefix[5],
-                        n->rssi, n->snr / 4, abs(n->snr % 4) * 25, ago);
-                }
+        LOG(TAG_NODE " Neighbours:%d\n\r", cnt);
+        for (uint8_t i = 0; i < cnt && i < 20; i++) {
+            const NeighbourInfo* n = repeaterHelper.getNeighbours().getNeighbour(i);
+            if (n) {
+                uint32_t ago = (millis() - n->lastHeard) / 1000;
+                LOG(TAG_NODE " %02X%02X%02X%02X%02X%02X %ddBm %d.%02ddB %lus\n\r",
+                    n->pubKeyPrefix[0], n->pubKeyPrefix[1], n->pubKeyPrefix[2],
+                    n->pubKeyPrefix[3], n->pubKeyPrefix[4], n->pubKeyPrefix[5],
+                    n->rssi, n->snr / 4, abs(n->snr % 4) * 25, ago);
             }
         }
-        LOG_RAW(ANSI_CYAN "└──────────────┴─────────┴─────────┴─────┘" ANSI_RESET "\n\r");
     }
     else if (strncmp(cmd, "set password ", 13) == 0) {
         const char* pwd = cmd + 13;
@@ -885,59 +773,26 @@ void processCommand(char* cmd) {
     }
     else if (strcmp(cmd, "radiostats") == 0) {
         const RadioStats& rs = repeaterHelper.getRadioStats();
-        LOG_RAW("\n\r");
-        LOG_RAW(ANSI_CYAN "┌────────────────────────────────┐\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE "        RADIO STATISTICS        " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤" ANSI_RESET "\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Last RSSI   " ANSI_GREEN "%4d" ANSI_WHITE " dBm          " ANSI_RESET ANSI_CYAN "│\n\r", rs.lastRssi);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Last SNR    " ANSI_GREEN "%2d.%02d" ANSI_WHITE " dB          " ANSI_RESET ANSI_CYAN "│\n\r", rs.lastSnr / 4, abs(rs.lastSnr % 4) * 25);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " TX Airtime  " ANSI_YELLOW "%lu" ANSI_WHITE " sec           " ANSI_RESET ANSI_CYAN "│\n\r", rs.txAirTimeSec);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " RX Airtime  " ANSI_YELLOW "%lu" ANSI_WHITE " sec           " ANSI_RESET ANSI_CYAN "│\n\r", rs.rxAirTimeSec);
-        LOG_RAW(ANSI_CYAN "└────────────────────────────────┘" ANSI_RESET "\n\r");
+        LOG(TAG_RADIO " RSSI:%ddBm SNR:%d.%02ddB\n\r", rs.lastRssi, rs.lastSnr / 4, abs(rs.lastSnr % 4) * 25);
+        LOG(TAG_RADIO " Airtime TX:%lus RX:%lus\n\r", rs.txAirTimeSec, rs.rxAirTimeSec);
     }
     else if (strcmp(cmd, "packetstats") == 0) {
         const PacketStats& ps = repeaterHelper.getPacketStats();
-        LOG_RAW("\n\r");
-        LOG_RAW(ANSI_CYAN "┌────────────────────────────────┐\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE "        PACKET STATISTICS       " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤" ANSI_RESET "\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Total RX    " ANSI_GREEN "%-14lu  " ANSI_RESET ANSI_CYAN "│\n\r", ps.numRecvPackets);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Total TX    " ANSI_MAGENTA "%-14lu  " ANSI_RESET ANSI_CYAN "│\n\r", ps.numSentPackets);
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " RX Flood    " ANSI_YELLOW "%-14lu  " ANSI_RESET ANSI_CYAN "│\n\r", ps.numRecvFlood);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " RX Direct   " ANSI_YELLOW "%-14lu  " ANSI_RESET ANSI_CYAN "│\n\r", ps.numRecvDirect);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " TX Flood    " ANSI_YELLOW "%-14lu  " ANSI_RESET ANSI_CYAN "│\n\r", ps.numSentFlood);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " TX Direct   " ANSI_YELLOW "%-14lu  " ANSI_RESET ANSI_CYAN "│\n\r", ps.numSentDirect);
-        LOG_RAW(ANSI_CYAN "└────────────────────────────────┘" ANSI_RESET "\n\r");
+        LOG(TAG_INFO " RX:%lu TX:%lu\n\r", ps.numRecvPackets, ps.numSentPackets);
+        LOG(TAG_INFO " Flood RX:%lu TX:%lu | Direct RX:%lu TX:%lu\n\r", ps.numRecvFlood, ps.numSentFlood, ps.numRecvDirect, ps.numSentDirect);
     }
     else if (strcmp(cmd, "acl") == 0) {
-        LOG_RAW("\n\r");
-        LOG_RAW(ANSI_CYAN "┌────────────────────────────────────────┐\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE "          ACCESS CONTROL LIST          " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────────────┤" ANSI_RESET "\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Admin pwd: " ANSI_YELLOW "%-24s  " ANSI_RESET ANSI_CYAN "│\n\r", sessionManager.getAdminPassword());
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Guest pwd: " ANSI_YELLOW "%-24s  " ANSI_RESET ANSI_CYAN "│\n\r",
-            strlen(sessionManager.getGuestPassword()) > 0 ? sessionManager.getGuestPassword() : "(disabled)");
-        LOG_RAW(ANSI_CYAN "├──────────────┬─────────────────────────┤" ANSI_RESET "\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE "  PubKey     " ANSI_CYAN "│" ANSI_WHITE "      Permission        " ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├──────────────┼─────────────────────────┤" ANSI_RESET "\n\r");
-
+        LOG(TAG_AUTH " Admin:%s Guest:%s\n\r", sessionManager.getAdminPassword(),
+            strlen(sessionManager.getGuestPassword()) > 0 ? sessionManager.getGuestPassword() : "-");
         uint8_t cnt = sessionManager.getSessionCount();
-        if (cnt == 0) {
-            LOG_RAW(ANSI_CYAN "│" ANSI_DIM "        No active sessions             " ANSI_RESET ANSI_CYAN "│\n\r");
-        } else {
-            for (uint8_t i = 0; i < MAX_CLIENT_SESSIONS; i++) {
-                const ClientSession* s = sessionManager.getSession(i);
-                if (s) {
-                    const char* permStr = s->permissions == PERM_ACL_ADMIN ? "ADMIN" :
-                                         s->permissions == PERM_ACL_GUEST ? "GUEST" : "NONE";
-                    LOG_RAW(ANSI_CYAN "│" ANSI_YELLOW " %02X%02X%02X%02X%02X%02X " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %-23s " ANSI_RESET ANSI_CYAN "│\n\r",
-                        s->pubKey[0], s->pubKey[1], s->pubKey[2],
-                        s->pubKey[3], s->pubKey[4], s->pubKey[5], permStr);
-                }
+        LOG(TAG_AUTH " Sessions:%d\n\r", cnt);
+        for (uint8_t i = 0; i < MAX_CLIENT_SESSIONS; i++) {
+            const ClientSession* s = sessionManager.getSession(i);
+            if (s) {
+                const char* p = s->permissions == PERM_ACL_ADMIN ? "ADM" : s->permissions == PERM_ACL_GUEST ? "GST" : "NON";
+                LOG(TAG_AUTH " %02X%02X%02X%02X%02X%02X %s\n\r", s->pubKey[0], s->pubKey[1], s->pubKey[2], s->pubKey[3], s->pubKey[4], s->pubKey[5], p);
             }
         }
-        LOG_RAW(ANSI_CYAN "└──────────────┴─────────────────────────┘" ANSI_RESET "\n\r");
     }
     else if (strcmp(cmd, "repeat") == 0) {
         LOG(TAG_INFO " Repeat: %s, Max hops: %d\n\r",
@@ -947,29 +802,12 @@ void processCommand(char* cmd) {
 #ifndef LITE_MODE
     // Daily report commands
     else if (strcmp(cmd, "report") == 0) {
-        LOG_RAW("\n\r");
-        LOG_RAW(ANSI_CYAN "┌────────────────────────────────┐\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE "        DAILY REPORT           " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤" ANSI_RESET "\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Status      %s%-16s" ANSI_RESET ANSI_CYAN "│\n\r",
-            reportEnabled ? ANSI_GREEN : ANSI_RED, reportEnabled ? "ENABLED" : "DISABLED");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Time        " ANSI_YELLOW "%02d:%02d            " ANSI_RESET ANSI_CYAN "│\n\r",
-            reportHour, reportMinute);
-        // Check if destination key is set
         bool keySet = false;
         for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
             if (reportDestPubKey[i] != 0) { keySet = true; break; }
         }
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Dest key    %s%-16s" ANSI_RESET ANSI_CYAN "│\n\r",
-            keySet ? ANSI_GREEN : ANSI_RED, keySet ? "SET" : "NOT SET");
-        if (keySet) {
-            LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Key hash    " ANSI_YELLOW "0x%02X             " ANSI_RESET ANSI_CYAN "│\n\r",
-                reportDestPubKey[0]);
-        }
-        LOG_RAW(ANSI_CYAN "└────────────────────────────────┘" ANSI_RESET "\n\r");
-        if (!keySet) {
-            LOG(TAG_INFO " Login as admin from app to set destination key\n\r");
-        }
+        LOG(TAG_INFO " Report:%s Time:%02d:%02d Key:%s\n\r", reportEnabled ? "ON" : "OFF", reportHour, reportMinute, keySet ? "SET" : "NO");
+        if (keySet) LOG(TAG_INFO " KeyHash:0x%02X\n\r", reportDestPubKey[0]);
     }
     else if (strcmp(cmd, "report on") == 0) {
         // Check if destination key is set
@@ -1029,57 +867,10 @@ void processCommand(char* cmd) {
     }
 #endif // LITE_MODE - end of daily report commands
     else if (strcmp(cmd, "help") == 0) {
-        LOG_RAW("\n\r");
-        LOG_RAW(ANSI_CYAN "┌────────────────────────────────┐\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE "      AVAILABLE COMMANDS       " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤" ANSI_RESET "\n\r");
-        LOG_RAW(ANSI_CYAN "│ " ANSI_BOLD ANSI_WHITE "Information                  " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "status" ANSI_WHITE "     System info      " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "stats" ANSI_WHITE "      Packet stats     " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "rssi" ANSI_WHITE "       Signal quality   " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "nodes" ANSI_WHITE "      Seen nodes       " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "power" ANSI_WHITE "      Power settings   " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "identity" ANSI_WHITE "   Node identity    " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "telemetry" ANSI_WHITE "  Battery & stats  " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "location" ANSI_WHITE "   GPS location     " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "time" ANSI_WHITE "       Show/set time   " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "neighbours" ANSI_WHITE " Nearby repeaters" ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "radiostats" ANSI_WHITE " Radio stats    " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "packetstats" ANSI_WHITE " Pkt breakdown" ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "acl" ANSI_WHITE "        Access control " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "repeat" ANSI_WHITE "     Repeat status  " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_GREEN "report" ANSI_WHITE "     Daily report   " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤\n\r");
-        LOG_RAW(ANSI_CYAN "│ " ANSI_BOLD ANSI_WHITE "Actions                      " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_YELLOW "ping" ANSI_WHITE "       Send test pkt   " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_YELLOW "advert" ANSI_WHITE "     ADVERT (flood)  " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_YELLOW "advert local" ANSI_WHITE " ADVERT (0hop)" ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_YELLOW "advert interval <s>" ANSI_WHITE "        " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_YELLOW "advert debug" ANSI_WHITE " Show raw pkt" ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤\n\r");
-        LOG_RAW(ANSI_CYAN "│ " ANSI_BOLD ANSI_WHITE "Config (EEPROM)              " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "name <n>" ANSI_WHITE "   Set node name  " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "location <lat> <lon>" ANSI_WHITE "       " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "location clear" ANSI_WHITE " Remove GPS " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "rxboost on|off" ANSI_WHITE "             " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "deepsleep on|off" ANSI_WHITE "           " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "mode 0|1|2" ANSI_WHITE " Power mode   " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "identity reset" ANSI_WHITE " New keys  " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "set password <p>" ANSI_WHITE " Admin pw " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "set guest <p>" ANSI_WHITE " Guest pw   " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "set repeat on|off" ANSI_WHITE "          " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "set flood.max <n>" ANSI_WHITE " Hops    " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "log on|off|dump|clear" ANSI_WHITE "      " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "report on|off" ANSI_WHITE " Daily rpt  " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "report time HH:MM" ANSI_WHITE "          " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "report test" ANSI_WHITE " Send now    " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_MAGENTA "report clear" ANSI_WHITE " Clear dest " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤\n\r");
-        LOG_RAW(ANSI_CYAN "│ " ANSI_BOLD ANSI_WHITE "System                       " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_RED "save" ANSI_WHITE "       Save config      " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_RED "reset" ANSI_WHITE "      Factory reset    " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "│  " ANSI_RED "reboot" ANSI_WHITE "     Restart system   " ANSI_RESET ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "└────────────────────────────────┘" ANSI_RESET "\n\r");
+        LOG(TAG_INFO " Info: status,stats,rssi,nodes,power,identity,telemetry,location,time,neighbours,radiostats,packetstats,acl,repeat,report\n\r");
+        LOG(TAG_INFO " Actions: ping,advert [local|interval|debug]\n\r");
+        LOG(TAG_INFO " Config: name,location,rxboost,deepsleep,mode,identity reset,set password/guest/repeat/flood.max,log,report\n\r");
+        LOG(TAG_INFO " System: save,reset,reboot\n\r");
     }
     // Contact and messaging commands
 #ifndef LITE_MODE
