@@ -196,6 +196,12 @@ MIT License - See LICENSE file for details.
 
 ## Changelog
 
+### v0.3.4 (2026-01-30)
+- Fixed remote CLI commands via mesh network
+- Added TXT_MSG (MC_PAYLOAD_PLAIN) handler for CLI commands
+- Now supports both REQUEST and TXT_MSG methods for remote CLI
+- Added detailed logging for authentication and CLI processing
+
 ### v0.3.3 (2026-01-23)
 - Added persistent statistics stored in EEPROM
 - Tracks lifetime: RX/TX/FWD packets, unique nodes, logins, uptime

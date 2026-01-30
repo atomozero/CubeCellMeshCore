@@ -2279,6 +2279,175 @@ bool processDiscoverRequest(MCPacket* pkt) {
 }
 
 //=============================================================================
+// TXT_MSG CLI Command handling (MC_PAYLOAD_PLAIN with TXT_TYPE_CLI)
+//=============================================================================
+
+/**
+ * Process encrypted TXT_MSG containing CLI command
+ *
+ * TXT_MSG packet format (MC_PAYLOAD_PLAIN):
+ * [0]     dest_hash (1 byte)
+ * [1]     src_hash (1 byte)
+ * [2-3]   MAC (2 bytes)
+ * [4+]    ciphertext (variable)
+ *
+ * Decrypted plaintext:
+ * [0-3]   timestamp (4 bytes)
+ * [4]     txt_type | attempt (upper 6 bits = type, lower 2 = attempt)
+ * [5+]    text/command (null-terminated string)
+ *
+ * @param pkt Received TXT_MSG packet
+ * @return true if command processed and response sent
+ */
+bool processTxtMsgCLI(MCPacket* pkt) {
+    if (pkt->payloadLen < 10) {
+        LOG(TAG_AUTH " TXT_MSG too short: %d\n\r", pkt->payloadLen);
+        return false;
+    }
+
+    uint8_t destHash = pkt->payload[0];
+    uint8_t srcHash = pkt->payload[1];
+
+    // Check if addressed to us
+    if (destHash != nodeIdentity.getNodeHash()) {
+        return false;  // Not for us
+    }
+
+    LOG(TAG_AUTH " TXT_MSG from %02X\n\r", srcHash);
+
+    // Find client session by src_hash
+    ClientSession* session = nullptr;
+    for (uint8_t i = 0; i < MAX_CLIENT_SESSIONS; i++) {
+        const ClientSession* s = sessionManager.getSession(i);
+        if (s && s->active && s->pubKey[0] == srcHash) {
+            session = const_cast<ClientSession*>(s);
+            break;
+        }
+    }
+
+    if (!session) {
+        LOG(TAG_AUTH " No session for %02X\n\r", srcHash);
+        return false;
+    }
+
+    // Decrypt using session's shared secret
+    const uint8_t* encrypted = &pkt->payload[2];
+    uint16_t encryptedLen = pkt->payloadLen - 2;
+
+    uint8_t decrypted[128];
+    uint16_t decryptedLen = meshCrypto.MACThenDecrypt(
+        decrypted, encrypted, encryptedLen,
+        session->sharedSecret, session->sharedSecret);
+
+    if (decryptedLen == 0) {
+        LOG(TAG_AUTH " TXT_MSG decrypt failed\n\r");
+        return false;
+    }
+
+    // Extract timestamp and check replay
+    uint32_t timestamp = decrypted[0] |
+                         (decrypted[1] << 8) |
+                         (decrypted[2] << 16) |
+                         (decrypted[3] << 24);
+
+    if (timestamp <= session->lastTimestamp) {
+        LOG(TAG_AUTH " TXT_MSG replay detected\n\r");
+        return false;
+    }
+    session->lastTimestamp = timestamp;
+    session->lastActivity = millis();
+
+    // Extract txt_type from byte[4]
+    uint8_t txtTypeByte = decrypted[4];
+    uint8_t txtType = (txtTypeByte >> 2) & 0x3F;  // Upper 6 bits
+
+    LOG(TAG_AUTH " TXT type=%d len=%d\n\r", txtType, decryptedLen);
+
+    // Only process CLI commands (TXT_TYPE_CLI = 0x01)
+    if (txtType != TXT_TYPE_CLI) {
+        LOG(TAG_AUTH " Not CLI type, ignoring\n\r");
+        return false;
+    }
+
+    // Only admin can execute CLI commands
+    if (session->permissions != PERM_ACL_ADMIN) {
+        LOG(TAG_AUTH " CLI requires admin\n\r");
+        return false;
+    }
+
+    // Extract command string (starts at byte 5)
+    char cmdStr[64];
+    uint16_t cmdLen = decryptedLen - 5;
+    if (cmdLen > sizeof(cmdStr) - 1) cmdLen = sizeof(cmdStr) - 1;
+    memcpy(cmdStr, &decrypted[5], cmdLen);
+    cmdStr[cmdLen] = '\0';
+
+    // Trim trailing whitespace/newlines
+    while (cmdLen > 0 && (cmdStr[cmdLen-1] == '\n' || cmdStr[cmdLen-1] == '\r' ||
+           cmdStr[cmdLen-1] == ' ' || cmdStr[cmdLen-1] == '\0')) {
+        cmdStr[--cmdLen] = '\0';
+    }
+
+    LOG(TAG_AUTH " CLI cmd: '%s'\n\r", cmdStr);
+
+    // Process command
+    char cliResponse[96];
+    uint16_t cliLen = processRemoteCommand(cmdStr, cliResponse, sizeof(cliResponse), true);
+
+    // Build response: [timestamp:4][txt_type:1][response_text]
+    uint8_t responseData[128];
+    uint16_t responseLen = 0;
+
+    // Echo back the request timestamp (for correlation)
+    responseData[responseLen++] = timestamp & 0xFF;
+    responseData[responseLen++] = (timestamp >> 8) & 0xFF;
+    responseData[responseLen++] = (timestamp >> 16) & 0xFF;
+    responseData[responseLen++] = (timestamp >> 24) & 0xFF;
+
+    // Response type: TXT_TYPE_CLI (0x01) in upper 6 bits
+    responseData[responseLen++] = (TXT_TYPE_CLI << 2) | 0;
+
+    // Append CLI response text
+    if (cliLen > 0 && responseLen + cliLen < sizeof(responseData)) {
+        memcpy(&responseData[responseLen], cliResponse, cliLen);
+        responseLen += cliLen;
+    }
+
+    // Encrypt response
+    uint8_t encryptedResponse[160];
+    uint16_t encLen = meshCrypto.encryptResponse(
+        encryptedResponse, responseData, responseLen, session->sharedSecret);
+
+    if (encLen == 0) {
+        return false;
+    }
+
+    // Build response packet (TXT_MSG / MC_PAYLOAD_PLAIN)
+    MCPacket respPkt;
+    respPkt.clear();
+    respPkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1);
+    respPkt.pathLen = 0;
+
+    // Payload: [dest_hash:1][src_hash:1][encrypted]
+    respPkt.payload[0] = srcHash;                        // Destination (client)
+    respPkt.payload[1] = nodeIdentity.getNodeHash();     // Source (us)
+    memcpy(&respPkt.payload[2], encryptedResponse, encLen);
+    respPkt.payloadLen = 2 + encLen;
+
+    // Queue for transmission
+    txQueue.add(&respPkt);
+
+    // Handle reboot command
+    if (strcmp(cmdStr, "reboot") == 0) {
+        pendingReboot = true;
+        rebootTime = millis() + 500;
+    }
+
+    LOG(TAG_AUTH " CLI response sent (%d bytes)\n\r", respPkt.payloadLen);
+    return true;
+}
+
+//=============================================================================
 // Authenticated REQUEST handling
 //=============================================================================
 
@@ -2688,6 +2857,18 @@ void processReceivedPacket(MCPacket* pkt) {
                 LOG(TAG_AUTH " Request rate limited\n\r");
             } else {
                 processAuthenticatedRequest(pkt);
+            }
+        }
+    }
+    // Handle TXT_MSG (MC_PAYLOAD_PLAIN) - may contain CLI commands
+    else if (pkt->header.getPayloadType() == MC_PAYLOAD_PLAIN) {
+        if (pkt->payloadLen >= 10 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
+            // Rate limit requests
+            if (!repeaterHelper.allowRequest()) {
+                statsRecordRateLimited();
+                LOG(TAG_AUTH " TXT_MSG rate limited\n\r");
+            } else {
+                processTxtMsgCLI(pkt);
             }
         }
     }

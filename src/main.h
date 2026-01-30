@@ -8,7 +8,7 @@
  * Based on MeshCore protocol: https://github.com/meshcore-dev/MeshCore
  */
 
-#define FIRMWARE_VERSION    "0.3.3"
+#define FIRMWARE_VERSION    "0.3.4"
 
 //=============================================================================
 // Configuration
@@ -393,5 +393,6 @@ void checkAdvertBeacon();
 
 // Authentication
 bool processAnonRequest(MCPacket* pkt);
+bool processTxtMsgCLI(MCPacket* pkt);
 bool sendLoginResponse(const uint8_t* clientPubKey, const uint8_t* sharedSecret,
                        bool isAdmin, uint8_t permissions, const uint8_t* outPath, uint8_t outPathLen);
