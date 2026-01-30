@@ -8,7 +8,7 @@
  * Based on MeshCore protocol: https://github.com/meshcore-dev/MeshCore
  */
 
-#define FIRMWARE_VERSION    "0.3.4"
+#define FIRMWARE_VERSION    "0.3.5"
 
 //=============================================================================
 // Configuration
@@ -367,6 +367,12 @@ uint32_t getTxDelayWeighted(int8_t snr);
 bool isActivelyReceiving();
 void feedWatchdog();
 void handleRadioError();
+
+// Radio parameter helpers (for tempradio support)
+float getCurrentFrequency();
+float getCurrentBandwidth();
+uint8_t getCurrentSpreadingFactor();
+uint8_t getCurrentCodingRate();
 
 // Power management
 void enterDeepSleep();

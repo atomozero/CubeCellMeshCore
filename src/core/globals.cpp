@@ -43,6 +43,15 @@ bool isReceiving = false;
 int radioError = RADIOLIB_ERR_NONE;
 
 //=============================================================================
+// Temporary radio parameters
+//=============================================================================
+bool tempRadioActive = false;
+float tempFrequency = 0;
+float tempBandwidth = 0;
+uint8_t tempSpreadingFactor = 0;
+uint8_t tempCodingRate = 0;
+
+//=============================================================================
 // Power saving
 //=============================================================================
 bool deepSleepEnabled = MC_DEEP_SLEEP_ENABLED;

@@ -196,6 +196,12 @@ MIT License - See LICENSE file for details.
 
 ## Changelog
 
+### v0.3.5 (2026-01-30)
+- Added temporary radio parameters (`tempradio` command)
+- Change frequency, bandwidth, SF, CR without saving to EEPROM
+- Useful for testing and debugging radio configurations
+- New commands: `radio`, `tempradio <freq> <bw> <sf> <cr>`, `tempradio off`
+
 ### v0.3.4 (2026-01-30)
 - Fixed remote CLI commands via mesh network
 - Added TXT_MSG (MC_PAYLOAD_PLAIN) handler for CLI commands

@@ -33,12 +33,14 @@ uint8_t cmdPos = 0;
 void processCommand(char* cmd) {
     if (strcmp(cmd, "?") == 0 || strcmp(cmd, "help") == 0) {
         LOG_RAW("Cmds:status stats lifetime advert nodes contacts neighbours telemetry identity\n\r"
-                "name[n] location[lat lon] time[ts] nodetype passwd sleep rxboost\n\r"
+                "name[n] location[lat lon] time[ts] nodetype passwd sleep rxboost radio tempradio\n\r"
                 "ratelimit[on|off|reset] savestats alert[on|off|dest|clear|test] newid reset save reboot\n\r");
     }
     else if (strcmp(cmd, "status") == 0) {
         LOG_RAW("FW:%s Node:%s Hash:%02X\n\r", FIRMWARE_VERSION, nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
-        LOG_RAW("Freq:%.3f BW:%.1f SF:%d CR:4/%d TX:%ddBm\n\r", MC_FREQUENCY, MC_BANDWIDTH, MC_SPREADING, MC_CODING_RATE, MC_TX_POWER);
+        LOG_RAW("Freq:%.3f BW:%.1f SF:%d CR:4/%d TX:%ddBm%s\n\r",
+            getCurrentFrequency(), getCurrentBandwidth(), getCurrentSpreadingFactor(),
+            getCurrentCodingRate(), MC_TX_POWER, tempRadioActive ? " [TEMP]" : "");
         LOG_RAW("Time:%s RSSI:%d SNR:%d.%d\n\r", timeSync.isSynchronized()?"sync":"nosync", lastRssi, lastSnr/4, abs(lastSnr%4)*25);
     }
     else if (strcmp(cmd, "stats") == 0) {
@@ -401,6 +403,70 @@ void processCommand(char* cmd) {
             LOG_RAW("Alert not configured or time not synced\n\r");
         }
     }
+    // Radio parameters
+    else if (strcmp(cmd, "radio") == 0) {
+        LOG_RAW("=== Radio Config ===\n\r");
+        LOG_RAW("Default: %.3f MHz BW=%.1f SF%d CR=4/%d\n\r",
+            (float)MC_FREQUENCY, (float)MC_BANDWIDTH, MC_SPREADING, MC_CODING_RATE);
+        if (tempRadioActive) {
+            LOG_RAW("Temp:    %.3f MHz BW=%.1f SF%d CR=4/%d [ACTIVE]\n\r",
+                tempFrequency, tempBandwidth, tempSpreadingFactor, tempCodingRate);
+        }
+        LOG_RAW("TX Power: %d dBm\n\r", MC_TX_POWER);
+    }
+    // Temporary radio: tempradio <freq> <bw> <sf> <cr>
+    else if (strncmp(cmd, "tempradio ", 10) == 0) {
+        float freq, bw;
+        int sf, cr;
+        if (sscanf(cmd + 10, "%f %f %d %d", &freq, &bw, &sf, &cr) == 4) {
+            // Validate parameters
+            if (freq < 150.0f || freq > 960.0f) {
+                LOG_RAW("Error: freq 150-960 MHz\n\r");
+            } else if (bw < 7.8f || bw > 500.0f) {
+                LOG_RAW("Error: bw 7.8-500 kHz\n\r");
+            } else if (sf < 6 || sf > 12) {
+                LOG_RAW("Error: sf 6-12\n\r");
+            } else if (cr < 5 || cr > 8) {
+                LOG_RAW("Error: cr 5-8\n\r");
+            } else {
+                tempFrequency = freq;
+                tempBandwidth = bw;
+                tempSpreadingFactor = sf;
+                tempCodingRate = cr;
+                tempRadioActive = true;
+                LOG_RAW("Temp radio: %.3f MHz BW=%.1f SF%d CR=4/%d\n\r", freq, bw, sf, cr);
+                LOG_RAW("Applying...\n\r");
+                setupRadio();
+                startReceive();
+                calculateTimings();
+                LOG_RAW("OK (use 'tempradio off' to revert)\n\r");
+            }
+        } else if (strcmp(cmd + 10, "off") == 0) {
+            if (tempRadioActive) {
+                tempRadioActive = false;
+                LOG_RAW("Reverting to default radio config...\n\r");
+                setupRadio();
+                startReceive();
+                calculateTimings();
+                LOG_RAW("OK\n\r");
+            } else {
+                LOG_RAW("Temp radio not active\n\r");
+            }
+        } else {
+            LOG_RAW("Usage: tempradio <freq> <bw> <sf> <cr>\n\r");
+            LOG_RAW("       tempradio off\n\r");
+            LOG_RAW("Example: tempradio 869.525 125 9 5\n\r");
+        }
+    }
+    else if (strcmp(cmd, "tempradio") == 0) {
+        if (tempRadioActive) {
+            LOG_RAW("Temp: %.3f MHz BW=%.1f SF%d CR=4/%d [ACTIVE]\n\r",
+                tempFrequency, tempBandwidth, tempSpreadingFactor, tempCodingRate);
+        } else {
+            LOG_RAW("Temp radio not active\n\r");
+            LOG_RAW("Usage: tempradio <freq> <bw> <sf> <cr>\n\r");
+        }
+    }
     else if (strcmp(cmd, "reset") == 0) {
         resetConfig();
         applyPowerSettings();
@@ -537,6 +603,70 @@ void processCommand(char* cmd) {
     else if (strcmp(cmd, "reset") == 0) {
         resetConfig();
         applyPowerSettings();
+    }
+    // Radio parameters
+    else if (strcmp(cmd, "radio") == 0) {
+        LOG(TAG_INFO " === Radio Configuration ===\n\r");
+        LOG(TAG_INFO " Default: %.3f MHz BW=%.1f kHz SF%d CR=4/%d\n\r",
+            (float)MC_FREQUENCY, (float)MC_BANDWIDTH, MC_SPREADING, MC_CODING_RATE);
+        if (tempRadioActive) {
+            LOG(TAG_INFO " Temp:    %.3f MHz BW=%.1f kHz SF%d CR=4/%d " ANSI_YELLOW "[ACTIVE]" ANSI_RESET "\n\r",
+                tempFrequency, tempBandwidth, tempSpreadingFactor, tempCodingRate);
+        }
+        LOG(TAG_INFO " TX Power: %d dBm\n\r", MC_TX_POWER);
+    }
+    // Temporary radio: tempradio <freq> <bw> <sf> <cr>
+    else if (strncmp(cmd, "tempradio ", 10) == 0) {
+        float freq, bw;
+        int sf, cr;
+        if (sscanf(cmd + 10, "%f %f %d %d", &freq, &bw, &sf, &cr) == 4) {
+            // Validate parameters
+            if (freq < 150.0f || freq > 960.0f) {
+                LOG(TAG_ERROR " Frequency must be 150-960 MHz\n\r");
+            } else if (bw < 7.8f || bw > 500.0f) {
+                LOG(TAG_ERROR " Bandwidth must be 7.8-500 kHz\n\r");
+            } else if (sf < 6 || sf > 12) {
+                LOG(TAG_ERROR " Spreading factor must be 6-12\n\r");
+            } else if (cr < 5 || cr > 8) {
+                LOG(TAG_ERROR " Coding rate must be 5-8 (for 4/5 to 4/8)\n\r");
+            } else {
+                tempFrequency = freq;
+                tempBandwidth = bw;
+                tempSpreadingFactor = sf;
+                tempCodingRate = cr;
+                tempRadioActive = true;
+                LOG(TAG_INFO " Temp radio: %.3f MHz BW=%.1f SF%d CR=4/%d\n\r", freq, bw, sf, cr);
+                LOG(TAG_INFO " Applying configuration...\n\r");
+                setupRadio();
+                startReceive();
+                calculateTimings();
+                LOG(TAG_OK " Temporary radio active (use 'tempradio off' to revert)\n\r");
+            }
+        } else if (strcmp(cmd + 10, "off") == 0) {
+            if (tempRadioActive) {
+                tempRadioActive = false;
+                LOG(TAG_INFO " Reverting to default radio configuration...\n\r");
+                setupRadio();
+                startReceive();
+                calculateTimings();
+                LOG(TAG_OK " Default radio restored\n\r");
+            } else {
+                LOG(TAG_WARN " Temporary radio not active\n\r");
+            }
+        } else {
+            LOG(TAG_INFO " Usage: tempradio <freq> <bw> <sf> <cr>\n\r");
+            LOG(TAG_INFO "        tempradio off\n\r");
+            LOG(TAG_INFO " Example: tempradio 869.525 125 9 5\n\r");
+        }
+    }
+    else if (strcmp(cmd, "tempradio") == 0) {
+        if (tempRadioActive) {
+            LOG(TAG_INFO " Temp: %.3f MHz BW=%.1f SF%d CR=4/%d " ANSI_YELLOW "[ACTIVE]" ANSI_RESET "\n\r",
+                tempFrequency, tempBandwidth, tempSpreadingFactor, tempCodingRate);
+        } else {
+            LOG(TAG_INFO " Temporary radio not active\n\r");
+            LOG(TAG_INFO " Usage: tempradio <freq> <bw> <sf> <cr>\n\r");
+        }
     }
     else if (strcmp(cmd, "newid") == 0) {
         LOG(TAG_WARN " Generating new identity with orlp crypto...\n\r");
@@ -1482,14 +1612,35 @@ void handleRadioError() {
 //=============================================================================
 // Radio Functions
 //=============================================================================
+
+// Get current radio parameters (temporary if active, otherwise default)
+float getCurrentFrequency() {
+    return tempRadioActive ? tempFrequency : MC_FREQUENCY;
+}
+float getCurrentBandwidth() {
+    return tempRadioActive ? tempBandwidth : MC_BANDWIDTH;
+}
+uint8_t getCurrentSpreadingFactor() {
+    return tempRadioActive ? tempSpreadingFactor : MC_SPREADING;
+}
+uint8_t getCurrentCodingRate() {
+    return tempRadioActive ? tempCodingRate : MC_CODING_RATE;
+}
+
 void setupRadio() {
-    LOG(TAG_RADIO " Initializing SX1262\n\r");
+    // Use temporary parameters if active, otherwise defaults
+    float freq = getCurrentFrequency();
+    float bw = getCurrentBandwidth();
+    uint8_t sf = getCurrentSpreadingFactor();
+    uint8_t cr = getCurrentCodingRate();
+
+    LOG(TAG_RADIO " Initializing SX1262%s\n\r", tempRadioActive ? " (TEMP)" : "");
 
     radioError = radio.begin(
-        MC_FREQUENCY,
-        MC_BANDWIDTH,
-        MC_SPREADING,
-        MC_CODING_RATE,
+        freq,
+        bw,
+        sf,
+        cr,
         MC_SYNCWORD,
         MC_TX_POWER,
         MC_PREAMBLE_LEN
@@ -1513,7 +1664,7 @@ void setupRadio() {
     applyPowerSettings();
 
     LOG(TAG_RADIO " Ready: %.3f MHz  BW=%.1f kHz  SF%d  CR=4/%d  CRC=ON\n\r",
-        MC_FREQUENCY, MC_BANDWIDTH, MC_SPREADING, MC_CODING_RATE);
+        freq, bw, sf, cr);
 }
 
 void startReceive() {

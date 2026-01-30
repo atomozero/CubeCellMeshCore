@@ -63,6 +63,15 @@ extern bool isReceiving;
 extern int radioError;
 
 //=============================================================================
+// Temporary radio parameters (not saved to EEPROM)
+//=============================================================================
+extern bool tempRadioActive;        // true if using temporary parameters
+extern float tempFrequency;         // MHz
+extern float tempBandwidth;         // kHz
+extern uint8_t tempSpreadingFactor; // 6-12
+extern uint8_t tempCodingRate;      // 5-8 (for 4/5 to 4/8)
+
+//=============================================================================
 // Power saving
 //=============================================================================
 extern bool deepSleepEnabled;
