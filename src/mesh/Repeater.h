@@ -22,9 +22,7 @@
 #define PERM_ACL_READWRITE          0x03  // Read-write access
 
 // Stats sub-types
-#define STATS_TYPE_CORE             0x00
 #define STATS_TYPE_RADIO            0x01
-#define STATS_TYPE_PACKETS          0x02
 
 // Limits
 #define MAX_NEIGHBOURS              50
@@ -184,16 +182,6 @@ struct ACLEntry {
         lastTimestamp = 0;
         valid = false;
     }
-};
-
-/**
- * Core Stats structure
- */
-struct CoreStats {
-    uint16_t battMillivolts;
-    uint32_t uptimeSecs;
-    uint16_t errFlags;
-    uint8_t queueLen;
 };
 
 /**
@@ -820,18 +808,6 @@ public:
     }
 
     /**
-     * Get core stats
-     */
-    CoreStats getCoreStats(uint16_t battMv, uint8_t queueLen) {
-        CoreStats stats;
-        stats.battMillivolts = battMv;
-        stats.uptimeSecs = (millis() - startTime) / 1000;
-        stats.errFlags = 0;
-        stats.queueLen = queueLen;
-        return stats;
-    }
-
-    /**
      * Get radio stats
      */
     const RadioStats& getRadioStats() const {
@@ -945,27 +921,6 @@ public:
     }
 
     /**
-     * Serialize core stats for response (legacy format)
-     */
-    uint16_t serializeCoreStats(uint8_t* buf, uint16_t battMv, uint8_t queueLen) {
-        CoreStats stats = getCoreStats(battMv, queueLen);
-        uint16_t pos = 0;
-
-        buf[pos++] = STATS_TYPE_CORE;
-        buf[pos++] = stats.battMillivolts & 0xFF;
-        buf[pos++] = (stats.battMillivolts >> 8) & 0xFF;
-        buf[pos++] = stats.uptimeSecs & 0xFF;
-        buf[pos++] = (stats.uptimeSecs >> 8) & 0xFF;
-        buf[pos++] = (stats.uptimeSecs >> 16) & 0xFF;
-        buf[pos++] = (stats.uptimeSecs >> 24) & 0xFF;
-        buf[pos++] = stats.errFlags & 0xFF;
-        buf[pos++] = (stats.errFlags >> 8) & 0xFF;
-        buf[pos++] = stats.queueLen;
-
-        return pos;
-    }
-
-    /**
      * Serialize radio stats for response
      */
     uint16_t serializeRadioStats(uint8_t* buf) {
@@ -984,53 +939,6 @@ public:
         buf[pos++] = (radioStats.rxAirTimeSec >> 8) & 0xFF;
         buf[pos++] = (radioStats.rxAirTimeSec >> 16) & 0xFF;
         buf[pos++] = (radioStats.rxAirTimeSec >> 24) & 0xFF;
-
-        return pos;
-    }
-
-    /**
-     * Serialize packet stats for response
-     */
-    uint16_t serializePacketStats(uint8_t* buf) {
-        uint16_t pos = 0;
-
-        buf[pos++] = STATS_TYPE_PACKETS;
-
-        // numRecvPackets
-        buf[pos++] = pktStats.numRecvPackets & 0xFF;
-        buf[pos++] = (pktStats.numRecvPackets >> 8) & 0xFF;
-        buf[pos++] = (pktStats.numRecvPackets >> 16) & 0xFF;
-        buf[pos++] = (pktStats.numRecvPackets >> 24) & 0xFF;
-
-        // numSentPackets
-        buf[pos++] = pktStats.numSentPackets & 0xFF;
-        buf[pos++] = (pktStats.numSentPackets >> 8) & 0xFF;
-        buf[pos++] = (pktStats.numSentPackets >> 16) & 0xFF;
-        buf[pos++] = (pktStats.numSentPackets >> 24) & 0xFF;
-
-        // numSentFlood
-        buf[pos++] = pktStats.numSentFlood & 0xFF;
-        buf[pos++] = (pktStats.numSentFlood >> 8) & 0xFF;
-        buf[pos++] = (pktStats.numSentFlood >> 16) & 0xFF;
-        buf[pos++] = (pktStats.numSentFlood >> 24) & 0xFF;
-
-        // numSentDirect
-        buf[pos++] = pktStats.numSentDirect & 0xFF;
-        buf[pos++] = (pktStats.numSentDirect >> 8) & 0xFF;
-        buf[pos++] = (pktStats.numSentDirect >> 16) & 0xFF;
-        buf[pos++] = (pktStats.numSentDirect >> 24) & 0xFF;
-
-        // numRecvFlood
-        buf[pos++] = pktStats.numRecvFlood & 0xFF;
-        buf[pos++] = (pktStats.numRecvFlood >> 8) & 0xFF;
-        buf[pos++] = (pktStats.numRecvFlood >> 16) & 0xFF;
-        buf[pos++] = (pktStats.numRecvFlood >> 24) & 0xFF;
-
-        // numRecvDirect
-        buf[pos++] = pktStats.numRecvDirect & 0xFF;
-        buf[pos++] = (pktStats.numRecvDirect >> 8) & 0xFF;
-        buf[pos++] = (pktStats.numRecvDirect >> 16) & 0xFF;
-        buf[pos++] = (pktStats.numRecvDirect >> 24) & 0xFF;
 
         return pos;
     }
@@ -1123,153 +1031,6 @@ public:
      */
     void cleanup() {
         neighbours.cleanExpired();
-    }
-};
-
-//=============================================================================
-// Region Filtering (simplified for CubeCell)
-//=============================================================================
-
-#define MAX_REGIONS             4
-#define MAX_TRANSPORT_CODES     8
-
-/**
- * Region definition for packet filtering
- */
-struct RegionDef {
-    uint8_t transportCodes[MAX_TRANSPORT_CODES];  // Allowed transport codes
-    uint8_t numCodes;                              // Number of codes in list
-    bool denyByDefault;                            // Deny packets not matching
-    bool valid;                                    // Entry is valid
-
-    void clear() {
-        memset(transportCodes, 0, MAX_TRANSPORT_CODES);
-        numCodes = 0;
-        denyByDefault = false;
-        valid = false;
-    }
-};
-
-/**
- * Region Manager - filters packets by transport codes
- */
-class RegionManager {
-private:
-    RegionDef regions[MAX_REGIONS];
-    bool filterEnabled;
-
-public:
-    RegionManager() : filterEnabled(false) {
-        for (int i = 0; i < MAX_REGIONS; i++) {
-            regions[i].clear();
-        }
-    }
-
-    /**
-     * Enable/disable region filtering
-     */
-    void setEnabled(bool en) {
-        filterEnabled = en;
-    }
-
-    bool isEnabled() const {
-        return filterEnabled;
-    }
-
-    /**
-     * Add a region with transport codes
-     * @param codes Array of transport codes
-     * @param numCodes Number of codes
-     * @param deny If true, deny packets matching these codes
-     * @return Region index, or -1 if full
-     */
-    int addRegion(const uint8_t* codes, uint8_t numCodes, bool deny = false) {
-        for (int i = 0; i < MAX_REGIONS; i++) {
-            if (!regions[i].valid) {
-                uint8_t n = (numCodes > MAX_TRANSPORT_CODES) ? MAX_TRANSPORT_CODES : numCodes;
-                memcpy(regions[i].transportCodes, codes, n);
-                regions[i].numCodes = n;
-                regions[i].denyByDefault = deny;
-                regions[i].valid = true;
-                return i;
-            }
-        }
-        return -1;  // No room
-    }
-
-    /**
-     * Remove a region
-     */
-    bool removeRegion(uint8_t idx) {
-        if (idx < MAX_REGIONS && regions[idx].valid) {
-            regions[idx].clear();
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * Clear all regions
-     */
-    void clearAll() {
-        for (int i = 0; i < MAX_REGIONS; i++) {
-            regions[i].clear();
-        }
-        filterEnabled = false;
-    }
-
-    /**
-     * Check if packet should be forwarded based on transport code
-     * @param transportCode Transport code from packet (first byte after path)
-     * @return true if packet should be forwarded
-     */
-    bool shouldForward(uint8_t transportCode) {
-        if (!filterEnabled) return true;  // No filtering
-
-        // Check each region
-        for (int i = 0; i < MAX_REGIONS; i++) {
-            if (!regions[i].valid) continue;
-
-            bool matches = false;
-            for (int j = 0; j < regions[i].numCodes; j++) {
-                if (regions[i].transportCodes[j] == transportCode) {
-                    matches = true;
-                    break;
-                }
-            }
-
-            if (regions[i].denyByDefault) {
-                // Deny list - if matches, don't forward
-                if (matches) return false;
-            } else {
-                // Allow list - if matches, forward
-                if (matches) return true;
-            }
-        }
-
-        // Default: forward if no deny rules matched
-        return true;
-    }
-
-    /**
-     * Get region count
-     */
-    uint8_t getCount() const {
-        uint8_t cnt = 0;
-        for (int i = 0; i < MAX_REGIONS; i++) {
-            if (regions[i].valid) cnt++;
-        }
-        return cnt;
-    }
-
-    /**
-     * Get region by index
-     */
-    const RegionDef* getRegion(uint8_t idx) const {
-        if (idx < MAX_REGIONS && regions[idx].valid) {
-            return &regions[idx];
-        }
-        return nullptr;
     }
 };
 
@@ -1429,20 +1190,10 @@ public:
 // CayenneLPP Telemetry Encoder
 //=============================================================================
 
-// CayenneLPP Data Types
-#define LPP_DIGITAL_INPUT       0x00
-#define LPP_DIGITAL_OUTPUT      0x01
+// CayenneLPP Data Types (used subset)
 #define LPP_ANALOG_INPUT        0x02  // 0.01 signed
-#define LPP_ANALOG_OUTPUT       0x03
-#define LPP_LUMINOSITY          0x65  // 101
-#define LPP_PRESENCE            0x66  // 102
 #define LPP_TEMPERATURE         0x67  // 103 - 0.1°C signed
-#define LPP_RELATIVE_HUMIDITY   0x68  // 104 - 0.5% unsigned
-#define LPP_ACCELEROMETER       0x71  // 113
-#define LPP_BAROMETRIC_PRESSURE 0x73  // 115 - 0.1 hPa
 #define LPP_VOLTAGE             0x74  // 116 - 0.01V unsigned (MeshCore)
-#define LPP_GYROMETER           0x86  // 134
-#define LPP_GPS                 0x88  // 136 - lat/lon/alt
 
 class CayenneLPP {
 private:
@@ -1509,112 +1260,4 @@ public:
         return true;
     }
 
-    /**
-     * Add humidity
-     * @param channel Channel number
-     * @param humidity Humidity percentage (0-100)
-     */
-    bool addRelativeHumidity(uint8_t channel, float humidity) {
-        if (cursor + 3 > maxSize) return false;
-
-        uint8_t val = (uint8_t)(humidity * 2);
-        buffer[cursor++] = channel;
-        buffer[cursor++] = LPP_RELATIVE_HUMIDITY;
-        buffer[cursor++] = val;
-        return true;
-    }
-
-    /**
-     * Add barometric pressure
-     * @param channel Channel number
-     * @param hPa Pressure in hPa
-     */
-    bool addBarometricPressure(uint8_t channel, float hPa) {
-        if (cursor + 4 > maxSize) return false;
-
-        uint16_t val = (uint16_t)(hPa * 10);
-        buffer[cursor++] = channel;
-        buffer[cursor++] = LPP_BAROMETRIC_PRESSURE;
-        buffer[cursor++] = (val >> 8) & 0xFF;
-        buffer[cursor++] = val & 0xFF;
-        return true;
-    }
-
-    /**
-     * Add GPS coordinates
-     * @param channel Channel number
-     * @param latitude Latitude in degrees
-     * @param longitude Longitude in degrees
-     * @param altitude Altitude in meters
-     */
-    bool addGPS(uint8_t channel, float latitude, float longitude, float altitude) {
-        if (cursor + 11 > maxSize) return false;
-
-        int32_t lat = (int32_t)(latitude * 10000);
-        int32_t lon = (int32_t)(longitude * 10000);
-        int32_t alt = (int32_t)(altitude * 100);
-
-        buffer[cursor++] = channel;
-        buffer[cursor++] = LPP_GPS;
-
-        // Latitude (3 bytes, MSB first)
-        buffer[cursor++] = (lat >> 16) & 0xFF;
-        buffer[cursor++] = (lat >> 8) & 0xFF;
-        buffer[cursor++] = lat & 0xFF;
-
-        // Longitude (3 bytes, MSB first)
-        buffer[cursor++] = (lon >> 16) & 0xFF;
-        buffer[cursor++] = (lon >> 8) & 0xFF;
-        buffer[cursor++] = lon & 0xFF;
-
-        // Altitude (3 bytes, MSB first)
-        buffer[cursor++] = (alt >> 16) & 0xFF;
-        buffer[cursor++] = (alt >> 8) & 0xFF;
-        buffer[cursor++] = alt & 0xFF;
-
-        return true;
-    }
-
-    /**
-     * Add digital input
-     * @param channel Channel number
-     * @param value 0 or 1
-     */
-    bool addDigitalInput(uint8_t channel, uint8_t value) {
-        if (cursor + 3 > maxSize) return false;
-
-        buffer[cursor++] = channel;
-        buffer[cursor++] = LPP_DIGITAL_INPUT;
-        buffer[cursor++] = value ? 1 : 0;
-        return true;
-    }
-
-    /**
-     * Add presence sensor
-     * @param channel Channel number
-     * @param value 0 or 1
-     */
-    bool addPresence(uint8_t channel, uint8_t value) {
-        if (cursor + 3 > maxSize) return false;
-
-        buffer[cursor++] = channel;
-        buffer[cursor++] = LPP_PRESENCE;
-        buffer[cursor++] = value ? 1 : 0;
-        return true;
-    }
-
-    /**
-     * Add luminosity
-     * @param channel Channel number
-     * @param lux Luminosity in lux
-     */
-    bool addLuminosity(uint8_t channel, uint16_t lux) {
-        if (cursor + 4 > maxSize) return false;
-
-        buffer[cursor++] = channel;
-        buffer[cursor++] = LPP_LUMINOSITY;
-        buffer[cursor++] = (lux >> 8) & 0xFF;
-        buffer[cursor++] = lux & 0xFF;
-        return true;
-    }
 };

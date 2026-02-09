@@ -206,29 +206,4 @@ public:
         }
     }
 
-    /**
-     * Print telemetry to Serial
-     */
-    void printInfo() {
-        update();
-
-        char uptimeStr[32];
-        formatUptime(uptimeStr, sizeof(uptimeStr));
-
-        Serial.printf("Battery: %dmV (%d%%)\n\r", data.batteryMv, getBatteryPercent());
-        Serial.printf("Temperature: %dC\n\r", data.temperature);
-        Serial.printf("Uptime: %s\n\r", uptimeStr);
-        Serial.printf("RX: %lu TX: %lu FWD: %lu ERR: %lu\n\r",
-                     data.rxCount, data.txCount, data.fwdCount, data.errorCount);
-        Serial.printf("Last: RSSI=%ddBm SNR=%d.%ddB\n\r",
-                     data.lastRssi, data.lastSnr / 4, abs(data.lastSnr % 4) * 25);
-    }
-
-    /**
-     * Get packets per hour (based on RX count and uptime)
-     */
-    float getPacketsPerHour() const {
-        if (data.uptime < 60) return 0;
-        return (data.rxCount * 3600.0f) / data.uptime;
-    }
 };

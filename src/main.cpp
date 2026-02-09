@@ -32,9 +32,9 @@ uint8_t cmdPos = 0;
 // Minimal command handler - essential commands only
 void processCommand(char* cmd) {
     if (strcmp(cmd, "?") == 0 || strcmp(cmd, "help") == 0) {
-        LOG_RAW("Cmds:status stats lifetime advert nodes contacts neighbours telemetry identity\n\r"
-                "name[n] location[lat lon] time[ts] nodetype passwd sleep rxboost radio tempradio\n\r"
-                "ratelimit[on|off|reset] savestats alert[on|off|dest|clear|test] newid reset save reboot\n\r");
+        LOG_RAW("status stats lifetime advert nodes contacts neighbours telemetry identity\n\r"
+                "name location time nodetype passwd sleep rxboost radio tempradio\n\r"
+                "ratelimit savestats alert newid reset save reboot\n\r");
     }
     else if (strcmp(cmd, "status") == 0) {
         LOG_RAW("FW:%s Node:%s Hash:%02X\n\r", FIRMWARE_VERSION, nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
@@ -49,13 +49,10 @@ void processCommand(char* cmd) {
     }
     else if (strcmp(cmd, "lifetime") == 0) {
         const PersistentStats* ps = getPersistentStats();
-        LOG_RAW("=== Lifetime Stats ===\n\r");
-        LOG_RAW("Boots: %d\n\r", ps->bootCount);
-        LOG_RAW("Uptime: %lu sec\n\r", statsGetTotalUptime());
-        LOG_RAW("RX: %lu TX: %lu FWD: %lu\n\r", ps->totalRxPackets, ps->totalTxPackets, ps->totalFwdPackets);
-        LOG_RAW("Unique nodes: %lu\n\r", ps->totalUniqueNodes);
-        LOG_RAW("Logins: %lu (failed: %lu)\n\r", ps->totalLogins, ps->totalLoginFails);
-        LOG_RAW("Rate limited: %lu\n\r", ps->totalRateLimited);
+        LOG_RAW("Boots:%d Up:%lus\n\r", ps->bootCount, statsGetTotalUptime());
+        LOG_RAW("RX:%lu TX:%lu FWD:%lu\n\r", ps->totalRxPackets, ps->totalTxPackets, ps->totalFwdPackets);
+        LOG_RAW("Nodes:%lu Login:%lu/%lu RLim:%lu\n\r",
+            ps->totalUniqueNodes, ps->totalLogins, ps->totalLoginFails, ps->totalRateLimited);
     }
     else if (strcmp(cmd, "savestats") == 0) {
         savePersistentStats();
@@ -63,15 +60,10 @@ void processCommand(char* cmd) {
     }
     else if (strcmp(cmd, "ratelimit") == 0) {
         LOG_RAW("RateLimit: %s\n\r", repeaterHelper.isRateLimitEnabled() ? "ON" : "OFF");
-        LOG_RAW("Login: %lu blocked (max %d/%ds)\n\r",
-            repeaterHelper.getLoginLimiter().getTotalBlocked(),
-            RATE_LIMIT_LOGIN_MAX, RATE_LIMIT_LOGIN_SECS);
-        LOG_RAW("Request: %lu blocked (max %d/%ds)\n\r",
-            repeaterHelper.getRequestLimiter().getTotalBlocked(),
-            RATE_LIMIT_REQUEST_MAX, RATE_LIMIT_REQUEST_SECS);
-        LOG_RAW("Forward: %lu blocked (max %d/%ds)\n\r",
-            repeaterHelper.getForwardLimiter().getTotalBlocked(),
-            RATE_LIMIT_FORWARD_MAX, RATE_LIMIT_FORWARD_SECS);
+        LOG_RAW("Login:%lu/%d Request:%lu/%d Fwd:%lu/%d\n\r",
+            repeaterHelper.getLoginLimiter().getTotalBlocked(), RATE_LIMIT_LOGIN_MAX,
+            repeaterHelper.getRequestLimiter().getTotalBlocked(), RATE_LIMIT_REQUEST_MAX,
+            repeaterHelper.getForwardLimiter().getTotalBlocked(), RATE_LIMIT_FORWARD_MAX);
     }
     else if (strncmp(cmd, "ratelimit ", 10) == 0) {
         if (strcmp(cmd + 10, "on") == 0) {
@@ -96,9 +88,9 @@ void processCommand(char* cmd) {
         }
     }
     else if (strcmp(cmd, "newid") == 0) {
-        LOG_RAW("Generating new identity...\n\r");
+        LOG_RAW("Gen new ID...\n\r");
         nodeIdentity.reset();
-        LOG_RAW("New: %s (hash:%02X) - reboot now\n\r", nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
+        LOG_RAW("New: %s %02X - reboot\n\r", nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
     }
     #ifdef ENABLE_CRYPTO_TESTS
     else if (strcmp(cmd, "test") == 0) {
@@ -159,14 +151,14 @@ void processCommand(char* cmd) {
         flags = (flags & 0xF0) | MC_TYPE_CHAT_NODE;
         nodeIdentity.setFlags(flags);
         nodeIdentity.save();
-        LOG_RAW("Node type: CHAT (0x%02X) - send advert\n\r", flags);
+        LOG_RAW("Type: CHAT 0x%02X\n\r", flags);
     }
     else if (strcmp(cmd, "nodetype repeater") == 0) {
         uint8_t flags = nodeIdentity.getFlags();
         flags = (flags & 0xF0) | MC_TYPE_REPEATER;
         nodeIdentity.setFlags(flags);
         nodeIdentity.save();
-        LOG_RAW("Node type: REPEATER (0x%02X) - send advert\n\r", flags);
+        LOG_RAW("Type: RPT 0x%02X\n\r", flags);
     }
     else if (strcmp(cmd, "passwd") == 0) {
         LOG_RAW("Admin: %s  Guest: %s\n\r",
@@ -176,12 +168,12 @@ void processCommand(char* cmd) {
     else if (strncmp(cmd, "passwd admin ", 13) == 0) {
         sessionManager.setAdminPassword(cmd + 13);
         saveConfig();
-        LOG_RAW("Admin password set: %s\n\r", cmd + 13);
+        LOG_RAW("Admin pwd: %s\n\r", cmd + 13);
     }
     else if (strncmp(cmd, "passwd guest ", 13) == 0) {
         sessionManager.setGuestPassword(cmd + 13);
         saveConfig();
-        LOG_RAW("Guest password set: %s\n\r", cmd + 13);
+        LOG_RAW("Guest pwd: %s\n\r", cmd + 13);
     }
     else if (strcmp(cmd, "sleep on") == 0) {
         deepSleepEnabled = true;
@@ -191,7 +183,7 @@ void processCommand(char* cmd) {
     else if (strcmp(cmd, "sleep off") == 0) {
         deepSleepEnabled = false;
         saveConfig();
-        LOG_RAW("Deep sleep: OFF (serial always active)\n\r");
+        LOG_RAW("Sleep: OFF\n\r");
     }
     else if (strcmp(cmd, "sleep") == 0) {
         LOG_RAW("Deep sleep: %s\n\r", deepSleepEnabled ? "ON" : "OFF");
@@ -359,7 +351,7 @@ void processCommand(char* cmd) {
             saveConfig();
             LOG_RAW("Node alert: ON\n\r");
         } else {
-            LOG_RAW("Set destination first: alert dest <pubkey>\n\r");
+            LOG_RAW("Set dest first: alert dest <key>\n\r");
         }
     }
     else if (strcmp(cmd, "alert off") == 0) {
@@ -394,25 +386,23 @@ void processCommand(char* cmd) {
         memset(alertDestPubKey, 0, REPORT_PUBKEY_SIZE);
         alertEnabled = false;
         saveConfig();
-        LOG_RAW("Alert destination cleared\n\r");
+        LOG_RAW("Alert cleared\n\r");
     }
     else if (strcmp(cmd, "alert test") == 0) {
         if (sendNodeAlert("TestNode", 0xAA, 1, -50)) {
             LOG_RAW("Test alert sent\n\r");
         } else {
-            LOG_RAW("Alert not configured or time not synced\n\r");
+            LOG_RAW("Alert not set\n\r");
         }
     }
     // Radio parameters
     else if (strcmp(cmd, "radio") == 0) {
-        LOG_RAW("=== Radio Config ===\n\r");
-        LOG_RAW("Default: %.3f MHz BW=%.1f SF%d CR=4/%d\n\r",
-            (float)MC_FREQUENCY, (float)MC_BANDWIDTH, MC_SPREADING, MC_CODING_RATE);
+        LOG_RAW("Def: %.3f BW%.1f SF%d CR%d %ddBm\n\r",
+            (float)MC_FREQUENCY, (float)MC_BANDWIDTH, MC_SPREADING, MC_CODING_RATE, MC_TX_POWER);
         if (tempRadioActive) {
-            LOG_RAW("Temp:    %.3f MHz BW=%.1f SF%d CR=4/%d [ACTIVE]\n\r",
+            LOG_RAW("Tmp: %.3f BW%.1f SF%d CR%d [ON]\n\r",
                 tempFrequency, tempBandwidth, tempSpreadingFactor, tempCodingRate);
         }
-        LOG_RAW("TX Power: %d dBm\n\r", MC_TX_POWER);
     }
     // Temporary radio: tempradio <freq> <bw> <sf> <cr>
     else if (strncmp(cmd, "tempradio ", 10) == 0) {
@@ -434,17 +424,16 @@ void processCommand(char* cmd) {
                 tempSpreadingFactor = sf;
                 tempCodingRate = cr;
                 tempRadioActive = true;
-                LOG_RAW("Temp radio: %.3f MHz BW=%.1f SF%d CR=4/%d\n\r", freq, bw, sf, cr);
-                LOG_RAW("Applying...\n\r");
+                LOG_RAW("Tmp: %.3f BW%.1f SF%d CR%d\n\r", freq, bw, sf, cr);
                 setupRadio();
                 startReceive();
                 calculateTimings();
-                LOG_RAW("OK (use 'tempradio off' to revert)\n\r");
+                LOG_RAW("OK\n\r");
             }
         } else if (strcmp(cmd + 10, "off") == 0) {
             if (tempRadioActive) {
                 tempRadioActive = false;
-                LOG_RAW("Reverting to default radio config...\n\r");
+                LOG_RAW("Reverting...\n\r");
                 setupRadio();
                 startReceive();
                 calculateTimings();
@@ -453,24 +442,21 @@ void processCommand(char* cmd) {
                 LOG_RAW("Temp radio not active\n\r");
             }
         } else {
-            LOG_RAW("Usage: tempradio <freq> <bw> <sf> <cr>\n\r");
-            LOG_RAW("       tempradio off\n\r");
-            LOG_RAW("Example: tempradio 869.525 125 9 5\n\r");
+            LOG_RAW("tempradio <freq> <bw> <sf> <cr> | off\n\r");
         }
     }
     else if (strcmp(cmd, "tempradio") == 0) {
         if (tempRadioActive) {
-            LOG_RAW("Temp: %.3f MHz BW=%.1f SF%d CR=4/%d [ACTIVE]\n\r",
+            LOG_RAW("Tmp: %.3f BW%.1f SF%d CR%d [ON]\n\r",
                 tempFrequency, tempBandwidth, tempSpreadingFactor, tempCodingRate);
         } else {
-            LOG_RAW("Temp radio not active\n\r");
-            LOG_RAW("Usage: tempradio <freq> <bw> <sf> <cr>\n\r");
+            LOG_RAW("Tmp radio off\n\r");
         }
     }
     else if (strcmp(cmd, "reset") == 0) {
         resetConfig();
         applyPowerSettings();
-        LOG_RAW("Config reset to defaults\n\r");
+        LOG_RAW("Config reset\n\r");
     }
     else if (strcmp(cmd, "save") == 0) {
         saveConfig();
@@ -860,7 +846,7 @@ void processCommand(char* cmd) {
             LOG(TAG_OK " Time set: %lu\n\r", ts);
             // Schedule ADVERT with new time
             pendingAdvertTime = millis() + ADVERT_AFTER_SYNC_MS;
-            LOG(TAG_INFO " Will send ADVERT in %d seconds\n\r", ADVERT_AFTER_SYNC_MS / 1000);
+            LOG(TAG_INFO " ADV in %ds\n\r", ADVERT_AFTER_SYNC_MS / 1000);
         } else {
             LOG(TAG_ERROR " Invalid timestamp (must be 2020-2100)\n\r");
         }
@@ -1290,31 +1276,28 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     // === Read-only commands (guest + admin) ===
 
     if (strcmp(cmd, "status") == 0) {
-        RESP_APPEND("Firmware: v%s\n", FIRMWARE_VERSION);
-        RESP_APPEND("Node: %s (0x%02X)\n", nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
-        RESP_APPEND("Uptime: %lus\n", millis() / 1000);
-        RESP_APPEND("Time: %s\n", timeSync.isSynchronized() ? "synced" : "not synced");
+        RESP_APPEND("FW:v%s %s(%02X) Up:%lus T:%s\n", FIRMWARE_VERSION,
+            nodeIdentity.getNodeName(), nodeIdentity.getNodeHash(),
+            millis() / 1000, timeSync.isSynchronized() ? "sync" : "nosync");
     }
     else if (strcmp(cmd, "stats") == 0) {
-        RESP_APPEND("RX: %lu TX: %lu FWD: %lu ERR: %lu\n", rxCount, txCount, fwdCount, errCount);
-        RESP_APPEND("ADV TX: %lu RX: %lu\n", advTxCount, advRxCount);
-        RESP_APPEND("Queue: %d/%d\n", txQueue.getCount(), MC_TX_QUEUE_SIZE);
+        RESP_APPEND("RX:%lu TX:%lu FWD:%lu E:%lu ADV:%lu/%lu Q:%d\n",
+            rxCount, txCount, fwdCount, errCount, advTxCount, advRxCount, txQueue.getCount());
     }
     else if (strcmp(cmd, "time") == 0) {
         if (timeSync.isSynchronized()) {
-            RESP_APPEND("Time: %lu (synced)\n", timeSync.getTimestamp());
+            RESP_APPEND("T:%lu sync\n", timeSync.getTimestamp());
         } else {
-            RESP_APPEND("Time: not synchronized\n");
+            RESP_APPEND("T:nosync\n");
         }
     }
     else if (strcmp(cmd, "telemetry") == 0) {
         telemetry.update();
-        RESP_APPEND("Battery: %dmV\n", telemetry.getBatteryMv());
-        RESP_APPEND("Uptime: %lus\n", millis() / 1000);
+        RESP_APPEND("Batt:%dmV Up:%lus\n", telemetry.getBatteryMv(), millis() / 1000);
     }
     else if (strcmp(cmd, "nodes") == 0) {
         uint8_t count = seenNodes.getCount();
-        RESP_APPEND("Seen nodes: %d\n", count);
+        RESP_APPEND("Nodes:%d\n", count);
         for (uint8_t i = 0; i < count && len < maxLen - 32; i++) {
             const SeenNode* n = seenNodes.getNode(i);
             if (n && n->lastSeen > 0) {
@@ -1325,15 +1308,14 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     else if (strcmp(cmd, "neighbours") == 0 || strcmp(cmd, "neighbors") == 0) {
         NeighbourTracker& nb = repeaterHelper.getNeighbours();
         uint8_t count = nb.getCount();
-        RESP_APPEND("Neighbours: %d\n", count);
+        RESP_APPEND("Nbr:%d\n", count);
     }
     else if (strcmp(cmd, "repeat") == 0) {
-        RESP_APPEND("Repeat: %s\n", repeaterHelper.isRepeatEnabled() ? "on" : "off");
-        RESP_APPEND("Max hops: %d\n", repeaterHelper.getMaxFloodHops());
+        RESP_APPEND("Rpt:%s hops:%d\n", repeaterHelper.isRepeatEnabled() ? "on" : "off",
+            repeaterHelper.getMaxFloodHops());
     }
     else if (strcmp(cmd, "identity") == 0) {
-        RESP_APPEND("Name: %s\n", nodeIdentity.getNodeName());
-        RESP_APPEND("Hash: 0x%02X\n", nodeIdentity.getNodeHash());
+        RESP_APPEND("%s %02X\n", nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
         if (nodeIdentity.hasLocation()) {
             RESP_APPEND("Loc: %.6f,%.6f\n",
                 nodeIdentity.getLatitude() / 1000000.0f,
@@ -1346,18 +1328,17 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
                 nodeIdentity.getLatitude() / 1000000.0f,
                 nodeIdentity.getLongitude() / 1000000.0f);
         } else {
-            RESP_APPEND("No location set\n");
+            RESP_APPEND("No loc\n");
         }
     }
     else if (strcmp(cmd, "advert interval") == 0) {
-        RESP_APPEND("Interval: %lus\n", advertGen.getInterval() / 1000);
-        RESP_APPEND("Next in: %lus\n", advertGen.getTimeUntilNext());
+        RESP_APPEND("Int:%lus next:%lus\n", advertGen.getInterval() / 1000, advertGen.getTimeUntilNext());
     }
 
     // === Admin-only commands ===
 
     else if (!isAdmin) {
-        RESP_APPEND("Error: admin required\n");
+        RESP_APPEND("Err:admin\n");
         return len;
     }
 
@@ -1424,7 +1405,7 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     }
     else if (strcmp(cmd, "location clear") == 0) {
         nodeIdentity.clearLocation();
-        RESP_APPEND("OK: location cleared\n");
+        RESP_APPEND("OK:loc cleared\n");
     }
     else if (strncmp(cmd, "advert interval ", 16) == 0) {
         uint32_t interval = strtoul(cmd + 16, NULL, 10);
@@ -1441,7 +1422,7 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     }
     else if (strcmp(cmd, "advert local") == 0) {
         sendAdvert(false);
-        RESP_APPEND("OK: advert local sent\n");
+        RESP_APPEND("OK:adv local\n");
     }
     else if (strcmp(cmd, "save") == 0) {
         saveConfig();
@@ -1457,11 +1438,11 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
         // (handled by caller)
     }
     else if (strcmp(cmd, "help") == 0) {
-        RESP_APPEND("Commands: status stats time telemetry nodes neighbours repeat identity location\n");
-        RESP_APPEND("Admin: set repeat/password/guest/flood.max, name, location, advert, save, reset, reboot\n");
+        RESP_APPEND("status stats time telemetry nodes neighbours repeat identity location\n"
+                    "admin: set repeat/password/guest/flood.max name location advert save reset reboot\n");
     }
     else {
-        RESP_APPEND("Error: unknown cmd\n");
+        RESP_APPEND("Err:unknown\n");
     }
 
     #undef RESP_APPEND
@@ -1617,7 +1598,7 @@ void handleRadioError() {
     errCount++;
 
     if (radioErrorCount >= MC_MAX_RADIO_ERRORS) {
-        LOG(TAG_WARN " Radio error threshold reached, resetting radio\n\r");
+        LOG(TAG_WARN " Radio err limit, reset\n\r");
         radio.reset();
         delay(100);
         setupRadio();
@@ -1625,7 +1606,7 @@ void handleRadioError() {
     }
 
     if (errCount >= MC_MAX_TOTAL_ERRORS) {
-        LOG(TAG_FATAL " Error threshold exceeded, rebooting system\n\r");
+        LOG(TAG_FATAL " Err limit, reboot\n\r");
         delay(100);
         #ifdef CUBECELL
         NVIC_SystemReset();
@@ -1658,7 +1639,7 @@ void setupRadio() {
     uint8_t sf = getCurrentSpreadingFactor();
     uint8_t cr = getCurrentCodingRate();
 
-    LOG(TAG_RADIO " Initializing SX1262%s\n\r", tempRadioActive ? " (TEMP)" : "");
+    LOG(TAG_RADIO " SX1262 init%s\n\r", tempRadioActive ? " TMP" : "");
 
     radioError = radio.begin(
         freq,
@@ -1671,14 +1652,14 @@ void setupRadio() {
     );
 
     if (radioError != RADIOLIB_ERR_NONE) {
-        LOG(TAG_FATAL " Radio initialization failed (code %d)\n\r", radioError);
+        LOG(TAG_FATAL " Radio fail %d\n\r", radioError);
         while (true) delay(1000);
     }
 
     // Explicitly enable CRC for MeshCore compatibility
     radioError = radio.setCRC(2);  // 2 = CRC-16
     if (radioError != RADIOLIB_ERR_NONE) {
-        LOG(TAG_WARN " CRC configuration failed (code %d)\n\r", radioError);
+        LOG(TAG_WARN " CRC cfg fail %d\n\r", radioError);
     }
 
     // Set DIO1 interrupt
@@ -1687,8 +1668,7 @@ void setupRadio() {
     // Apply power settings
     applyPowerSettings();
 
-    LOG(TAG_RADIO " Ready: %.3f MHz  BW=%.1f kHz  SF%d  CR=4/%d  CRC=ON\n\r",
-        freq, bw, sf, cr);
+    LOG(TAG_RADIO " %.3f BW%.1f SF%d CR%d\n\r", freq, bw, sf, cr);
 }
 
 void startReceive() {
@@ -1708,7 +1688,7 @@ void startReceive() {
     );
 
     if (radioError != RADIOLIB_ERR_NONE) {
-        LOG(TAG_ERROR " RX start failed (code %d)\n\r", radioError);
+        LOG(TAG_ERROR " RX fail %d\n\r", radioError);
         // Try reset
         radio.reset();
         delay(100);
@@ -1723,7 +1703,7 @@ bool transmitPacket(MCPacket* pkt) {
     uint16_t len = pkt->serialize(buf, sizeof(buf));
 
     if (len == 0) {
-        LOG(TAG_ERROR " Packet serialization failed\n\r");
+        LOG(TAG_ERROR " Pkt serial fail\n\r");
         return false;
     }
 
@@ -1747,7 +1727,7 @@ bool transmitPacket(MCPacket* pkt) {
     isReceiving = false;
 
     if (radioError != RADIOLIB_ERR_NONE) {
-        LOG(TAG_ERROR " TX failed (code %d)\n\r", radioError);
+        LOG(TAG_ERROR " TX err %d\n\r", radioError);
         ledOff();
         return false;
     }
@@ -1802,7 +1782,7 @@ void sendPing() {
     pkt.payloadLen = snprintf((char*)pkt.payload, MC_MAX_PAYLOAD_SIZE,
                                "PING #%u from %08lX", pingCounter, nodeId);
 
-    LOG(TAG_PING " Sending test packet #%u\n\r", pingCounter);
+    LOG(TAG_PING " #%u\n\r", pingCounter);
 
     // Add to packet cache so we don't re-forward our own ping
     uint32_t id = getPacketId(&pkt);
@@ -1810,9 +1790,9 @@ void sendPing() {
 
     // Transmit directly (no queue delay for ping)
     if (transmitPacket(&pkt)) {
-        LOG(TAG_PING " Transmission successful\n\r");
+        LOG(TAG_PING " TX ok\n\r");
     } else {
-        LOG(TAG_PING " Transmission failed\n\r");
+        LOG(TAG_PING " TX fail\n\r");
     }
 
     startReceive();
@@ -1828,12 +1808,12 @@ void sendPing() {
  */
 void sendAdvertNoFlags() {
     if (!nodeIdentity.isInitialized()) {
-        LOG(TAG_ERROR " Identity not initialized\n\r");
+        LOG(TAG_ERROR " No ID\n\r");
         return;
     }
 
     if (!timeSync.isSynchronized()) {
-        LOG(TAG_ERROR " Time not synchronized\n\r");
+        LOG(TAG_ERROR " No time sync\n\r");
         return;
     }
 
@@ -1885,17 +1865,17 @@ void sendAdvertNoFlags() {
 
     pkt.payloadLen = pos;
 
-    LOG(TAG_ADVERT " Sending ADVERT noflags (%s) ts=%lu len=%d\n\r",
+    LOG(TAG_ADVERT " ADV noflg %s t=%lu l=%d\n\r",
         name, timestamp, pkt.payloadLen);
 
     uint32_t id = getPacketId(&pkt);
     packetCache.addIfNew(id);
 
     if (transmitPacket(&pkt)) {
-        LOG(TAG_ADVERT " Transmission successful\n\r");
+        LOG(TAG_ADVERT " TX ok\n\r");
         advTxCount++;
     } else {
-        LOG(TAG_ADVERT " Transmission failed\n\r");
+        LOG(TAG_ADVERT " TX fail\n\r");
     }
 
     startReceive();
@@ -1903,7 +1883,7 @@ void sendAdvertNoFlags() {
 
 void sendAdvert(bool flood) {
     if (!nodeIdentity.isInitialized()) {
-        LOG(TAG_ERROR " Identity not initialized\n\r");
+        LOG(TAG_ERROR " No ID\n\r");
         return;
     }
 
@@ -1917,12 +1897,12 @@ void sendAdvert(bool flood) {
     }
 
     if (!success) {
-        LOG(TAG_ERROR " Failed to build ADVERT packet\n\r");
+        LOG(TAG_ERROR " ADV build fail\n\r");
         return;
     }
 
-    LOG(TAG_ADVERT " Sending %s ADVERT (%s)\n\r",
-        flood ? "flood" : "zero-hop",
+    LOG(TAG_ADVERT " %s %s\n\r",
+        flood ? "flood" : "local",
         nodeIdentity.getNodeName());
 
     // Add to packet cache so we don't re-forward our own ADVERT
@@ -1930,11 +1910,11 @@ void sendAdvert(bool flood) {
     packetCache.addIfNew(id);
 
     if (transmitPacket(&pkt)) {
-        LOG(TAG_ADVERT " Transmission successful\n\r");
+        LOG(TAG_ADVERT " TX ok\n\r");
         advertGen.markSent();
         advTxCount++;
     } else {
-        LOG(TAG_ADVERT " Transmission failed\n\r");
+        LOG(TAG_ADVERT " TX fail\n\r");
     }
 
     startReceive();
@@ -1950,30 +1930,29 @@ void sendAdvert(bool flood) {
  */
 void sendDirectMessage(const char* recipientName, const char* message) {
     if (!nodeIdentity.isInitialized()) {
-        LOG(TAG_ERROR " Identity not initialized\n\r");
+        LOG(TAG_ERROR " No ID\n\r");
         return;
     }
 
     if (!timeSync.isSynchronized()) {
-        LOG(TAG_ERROR " Time not synchronized - cannot send message\n\r");
+        LOG(TAG_ERROR " No time sync\n\r");
         return;
     }
 
     // Find contact by name
     Contact* contact = contactMgr.findByName(recipientName);
     if (!contact) {
-        LOG(TAG_ERROR " Contact '%s' not found\n\r", recipientName);
-        LOG(TAG_INFO " Known contacts:\n\r");
+        LOG(TAG_ERROR " Contact '%s' ?\n\r", recipientName);
         contactMgr.printContacts();
         return;
     }
 
-    LOG(TAG_INFO " Sending message to %s...\n\r", contact->name);
+    LOG(TAG_INFO " Msg to %s\n\r", contact->name);
 
     // Get or calculate shared secret
     const uint8_t* sharedSecret = contactMgr.getSharedSecret(contact);
     if (!sharedSecret) {
-        LOG(TAG_ERROR " Failed to calculate shared secret\n\r");
+        LOG(TAG_ERROR " ECDH fail\n\r");
         return;
     }
 
@@ -2005,7 +1984,7 @@ void sendDirectMessage(const char* recipientName, const char* message) {
     uint16_t encryptedLen = msgCrypto.encryptThenMAC(sharedSecret, encrypted,
                                                        plaintext, plaintextLen);
     if (encryptedLen == 0) {
-        LOG(TAG_ERROR " Encryption failed\n\r");
+        LOG(TAG_ERROR " Encrypt fail\n\r");
         return;
     }
 
@@ -2033,10 +2012,10 @@ void sendDirectMessage(const char* recipientName, const char* message) {
     packetCache.addIfNew(id);
 
     if (transmitPacket(&pkt)) {
-        LOG(TAG_OK " Message sent to %s\n\r", contact->name);
+        LOG(TAG_OK " Sent to %s\n\r", contact->name);
         txCount++;
     } else {
-        LOG(TAG_ERROR " Transmission failed\n\r");
+        LOG(TAG_ERROR " TX fail\n\r");
     }
 
     startReceive();
@@ -2094,20 +2073,20 @@ bool sendDailyReport() {
         if (reportDestPubKey[i] != 0) { keySet = true; break; }
     }
     if (!keySet) {
-        LOG(TAG_INFO " Report: no destination key set\n\r");
+        LOG(TAG_INFO " Report: no dest\n\r");
         return false;
     }
 
     // Check time sync
     if (!timeSync.isSynchronized()) {
-        LOG(TAG_INFO " Report: time not synchronized\n\r");
+        LOG(TAG_INFO " Report: no sync\n\r");
         return false;
     }
 
     // Calculate shared secret with destination
     uint8_t sharedSecret[MC_SHARED_SECRET_SIZE];
     if (!MeshCrypto::calcSharedSecret(sharedSecret, nodeIdentity.getPrivateKey(), reportDestPubKey)) {
-        LOG(TAG_ERROR " Report: ECDH failed\n\r");
+        LOG(TAG_ERROR " Rpt ECDH fail\n\r");
         return false;
     }
 
@@ -2115,7 +2094,7 @@ bool sendDailyReport() {
     char reportText[128];
     uint16_t textLen = generateReportContent(reportText, sizeof(reportText) - 1);
     if (textLen == 0) {
-        LOG(TAG_ERROR " Report: failed to generate content\n\r");
+        LOG(TAG_ERROR " Rpt gen fail\n\r");
         return false;
     }
 
@@ -2135,7 +2114,7 @@ bool sendDailyReport() {
     uint16_t encLen = meshCrypto.encryptThenMAC(encrypted, plaintext, plaintextLen,
                                                  sharedSecret, sharedSecret);
     if (encLen == 0) {
-        LOG(TAG_ERROR " Report: encryption failed\n\r");
+        LOG(TAG_ERROR " Rpt encrypt fail\n\r");
         memset(sharedSecret, 0, sizeof(sharedSecret));
         return false;
     }
@@ -2161,7 +2140,7 @@ bool sendDailyReport() {
     memset(plaintext, 0, sizeof(plaintext));
 
     // Log
-    LOG(TAG_INFO " Sending daily report to 0x%02X (%d bytes)\n\r",
+    LOG(TAG_INFO " Rpt to %02X %dB\n\r",
         reportDestPubKey[0], pkt.payloadLen);
 
     // Add to packet cache so we don't re-forward our own message
@@ -2200,14 +2179,14 @@ void checkDailyReport() {
 
     // Check if it's time (within a 60-second window to avoid missing)
     if (secondsToday >= targetSeconds && secondsToday < targetSeconds + 60) {
-        LOG(TAG_INFO " Daily report scheduled time reached (%02d:%02d)\n\r",
+        LOG(TAG_INFO " Rpt time %02d:%02d\n\r",
             reportHour, reportMinute);
 
         if (sendDailyReport()) {
             lastReportDay = dayNumber;  // Mark as sent today
-            LOG(TAG_OK " Daily report sent successfully\n\r");
+            LOG(TAG_OK " Rpt sent\n\r");
         } else {
-            LOG(TAG_ERROR " Daily report failed\n\r");
+            LOG(TAG_ERROR " Rpt fail\n\r");
         }
     }
 }
@@ -2280,7 +2259,7 @@ bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int
     memcpy(&pkt.payload[2], encrypted, encLen);
     pkt.payloadLen = 2 + encLen;
 
-    LOG(TAG_INFO " Sending node alert to 0x%02X\n\r", alertDestPubKey[0]);
+    LOG(TAG_INFO " Alert to %02X\n\r", alertDestPubKey[0]);
 
     // Add to cache and queue
     uint32_t id = getPacketId(&pkt);
@@ -2295,7 +2274,7 @@ void checkAdvertBeacon() {
     // Check for pending ADVERT after time sync
     if (pendingAdvertTime > 0 && millis() >= pendingAdvertTime) {
         pendingAdvertTime = 0;  // Clear pending
-        LOG(TAG_ADVERT " Sending scheduled ADVERT after time sync\n\r");
+        LOG(TAG_ADVERT " Sched ADV post-sync\n\r");
         sendAdvert(true);
         return;  // Don't send another one immediately
     }
@@ -2398,11 +2377,11 @@ bool processDiscoverRequest(MCPacket* pkt) {
 
     // Check rate limiting
     if (!repeaterHelper.canRespondToDiscover()) {
-        LOG(TAG_DISCOVERY " Rate limited, skipping response\n\r");
+        LOG(TAG_DISCOVERY " Rate limited\n\r");
         return false;
     }
 
-    LOG(TAG_DISCOVERY " Received DISCOVER_REQ (filter=0x%02X, tag=0x%08lX)\n\r",
+    LOG(TAG_DISCOVERY " DISC_REQ f=%02X t=%08lX\n\r",
         typeFilter, requestTag);
 
     // Build discover response
@@ -2446,7 +2425,7 @@ bool processDiscoverRequest(MCPacket* pkt) {
     uint32_t baseDelay = getTxDelayWeighted(pkt->snr);
     uint32_t randomDelay = random(baseDelay * 2, baseDelay * 6);
 
-    LOG(TAG_DISCOVERY " Sending DISCOVER_RESP (delay=%lums)\n\r", randomDelay);
+    LOG(TAG_DISCOVERY " DISC_RESP d=%lums\n\r", randomDelay);
 
     // Queue with delay
     delay(randomDelay);
@@ -2478,7 +2457,7 @@ bool processDiscoverRequest(MCPacket* pkt) {
  */
 bool processTxtMsgCLI(MCPacket* pkt) {
     if (pkt->payloadLen < 10) {
-        LOG(TAG_AUTH " TXT_MSG too short: %d\n\r", pkt->payloadLen);
+        LOG(TAG_AUTH " TXT short %d\n\r", pkt->payloadLen);
         return false;
     }
 
@@ -2517,7 +2496,7 @@ bool processTxtMsgCLI(MCPacket* pkt) {
         session->sharedSecret, session->sharedSecret);
 
     if (decryptedLen == 0) {
-        LOG(TAG_AUTH " TXT_MSG decrypt failed\n\r");
+        LOG(TAG_AUTH " TXT decrypt fail\n\r");
         return false;
     }
 
@@ -2528,7 +2507,7 @@ bool processTxtMsgCLI(MCPacket* pkt) {
                          (decrypted[3] << 24);
 
     if (timestamp <= session->lastTimestamp) {
-        LOG(TAG_AUTH " TXT_MSG replay detected\n\r");
+        LOG(TAG_AUTH " TXT replay\n\r");
         return false;
     }
     session->lastTimestamp = timestamp;
@@ -2542,13 +2521,13 @@ bool processTxtMsgCLI(MCPacket* pkt) {
 
     // Only process CLI commands (TXT_TYPE_CLI = 0x01)
     if (txtType != TXT_TYPE_CLI) {
-        LOG(TAG_AUTH " Not CLI type, ignoring\n\r");
+        LOG(TAG_AUTH " Not CLI\n\r");
         return false;
     }
 
     // Only admin can execute CLI commands
     if (session->permissions != PERM_ACL_ADMIN) {
-        LOG(TAG_AUTH " CLI requires admin\n\r");
+        LOG(TAG_AUTH " Need admin\n\r");
         return false;
     }
 
@@ -2620,7 +2599,7 @@ bool processTxtMsgCLI(MCPacket* pkt) {
         rebootTime = millis() + 500;
     }
 
-    LOG(TAG_AUTH " CLI response sent (%d bytes)\n\r", respPkt.payloadLen);
+    LOG(TAG_AUTH " CLI resp %dB\n\r", respPkt.payloadLen);
     return true;
 }
 
@@ -2922,7 +2901,7 @@ bool sendLoginResponse(const uint8_t* clientPubKey, const uint8_t* sharedSecret,
 bool processAnonRequest(MCPacket* pkt) {
     // Minimum size: 1 (dest_hash) + 32 (ephemeral) + 2 (MAC) + 16 (min ciphertext)
     if (pkt->payloadLen < 51) {
-        LOG(TAG_AUTH " ANON_REQ too short: %d bytes\n\r", pkt->payloadLen);
+        LOG(TAG_AUTH " ANON short %d\n\r", pkt->payloadLen);
         return false;
     }
 
@@ -3027,7 +3006,7 @@ void processReceivedPacket(MCPacket* pkt) {
             // Rate limit login attempts
             if (!repeaterHelper.allowLogin()) {
                 statsRecordRateLimited();  // Persistent stats
-                LOG(TAG_AUTH " Login rate limited\n\r");
+                LOG(TAG_AUTH " Login lim\n\r");
             } else {
                 processAnonRequest(pkt);
             }
@@ -3039,7 +3018,7 @@ void processReceivedPacket(MCPacket* pkt) {
             // Rate limit requests
             if (!repeaterHelper.allowRequest()) {
                 statsRecordRateLimited();  // Persistent stats
-                LOG(TAG_AUTH " Request rate limited\n\r");
+                LOG(TAG_AUTH " Req lim\n\r");
             } else {
                 processAuthenticatedRequest(pkt);
             }
@@ -3051,7 +3030,7 @@ void processReceivedPacket(MCPacket* pkt) {
             // Rate limit requests
             if (!repeaterHelper.allowRequest()) {
                 statsRecordRateLimited();
-                LOG(TAG_AUTH " TXT_MSG rate limited\n\r");
+                LOG(TAG_AUTH " TXT lim\n\r");
             } else {
                 processTxtMsgCLI(pkt);
             }
@@ -3098,45 +3077,39 @@ void processReceivedPacket(MCPacket* pkt) {
             if (syncResult == 1) {
                 // First sync - use immediately
                 ledBlueDoubleBlink();  // Signal time sync acquired
-                LOG(TAG_OK " " ANSI_GREEN "Time synchronized!" ANSI_RESET " Unix: %lu\n\r", timeSync.getTimestamp());
+                LOG(TAG_OK " Time sync %lu\n\r", timeSync.getTimestamp());
                 statsSetFirstBootTime(timeSync.getTimestamp());  // Persistent stats
                 // Schedule our own ADVERT after sync
                 pendingAdvertTime = millis() + ADVERT_AFTER_SYNC_MS;
-                LOG(TAG_INFO " Will send ADVERT in %d seconds\n\r", ADVERT_AFTER_SYNC_MS / 1000);
+                LOG(TAG_INFO " ADV in %ds\n\r", ADVERT_AFTER_SYNC_MS / 1000);
             } else if (syncResult == 2) {
                 // Re-sync via consensus (2 different sources agreed)
                 ledBlueDoubleBlink();  // Signal time re-sync
-                LOG(TAG_OK " " ANSI_GREEN "Time re-synchronized!" ANSI_RESET " (consensus) Unix: %lu\n\r", timeSync.getTimestamp());
+                LOG(TAG_OK " Time resync %lu\n\r", timeSync.getTimestamp());
                 // Schedule new ADVERT with updated time
                 pendingAdvertTime = millis() + ADVERT_AFTER_SYNC_MS;
-                LOG(TAG_INFO " Will send ADVERT in %d seconds\n\r", ADVERT_AFTER_SYNC_MS / 1000);
+                LOG(TAG_INFO " ADV in %ds\n\r", ADVERT_AFTER_SYNC_MS / 1000);
             } else if (timeSync.hasPendingSync()) {
                 // Received different time, stored as pending - waiting for confirmation
-                LOG(TAG_INFO " Time drift detected: %lu (pending confirmation)\n\r", advertTime);
+                LOG(TAG_INFO " Time drift %lu pending\n\r", advertTime);
             }
         }
 
         AdvertInfo advInfo;
         if (AdvertGenerator::parseAdvert(pkt->payload, pkt->payloadLen, &advInfo)) {
             // Show node info
-            LOG(TAG_NODE " " ANSI_BOLD "%s" ANSI_RESET, advInfo.name);
-            if (advInfo.isRepeater) {
-                LOG_RAW(ANSI_CYAN " [RPT]" ANSI_RESET);
-            }
-            if (advInfo.isChatNode) {
-                LOG_RAW(ANSI_GREEN " [CHAT]" ANSI_RESET);
-            }
-            LOG_RAW(" hash=%02X", advInfo.pubKeyHash);
-            if (advInfo.hasLocation) {
-                LOG_RAW(" loc=%.4f,%.4f", advInfo.latitude, advInfo.longitude);
-            }
+            LOG(TAG_NODE " %s", advInfo.name);
+            if (advInfo.isRepeater) LOG_RAW(" R");
+            if (advInfo.isChatNode) LOG_RAW(" C");
+            LOG_RAW(" %02X", advInfo.pubKeyHash);
+            if (advInfo.hasLocation) LOG_RAW(" %.4f,%.4f", advInfo.latitude, advInfo.longitude);
             LOG_RAW("\n\r");
 
             // Update seen nodes with pubkey hash and name from ADVERT
             bool isNew = seenNodes.update(advInfo.pubKeyHash, pkt->rssi, pkt->snr, advInfo.name);
             if (isNew) {
                 statsRecordUniqueNode();  // Persistent stats
-                LOG(TAG_NODE " New node discovered via ADVERT\n\r");
+                LOG(TAG_NODE " New node\n\r");
                 // Send alert for new node
                 uint8_t nodeType = advInfo.isChatNode ? 1 : advInfo.isRepeater ? 2 : 0;
                 sendNodeAlert(advInfo.name, advInfo.pubKeyHash, nodeType, pkt->rssi);
@@ -3153,7 +3126,7 @@ void processReceivedPacket(MCPacket* pkt) {
                     pkt->payload,  // First 32 bytes are pubkey
                     pkt->snr, pkt->rssi);
                 if (newNeighbour) {
-                    LOG(TAG_NODE " New direct neighbour: %s (0-hop)\n\r", advInfo.name);
+                    LOG(TAG_NODE " Nbr: %s\n\r", advInfo.name);
                 }
             }
         }
@@ -3164,7 +3137,7 @@ void processReceivedPacket(MCPacket* pkt) {
         bool isNew = seenNodes.update(pkt->path[0], pkt->rssi, pkt->snr);
         if (isNew) {
             statsRecordUniqueNode();  // Persistent stats
-            LOG(TAG_NODE " New relay node detected: %02X\n\r", pkt->path[0]);
+            LOG(TAG_NODE " New %02X\n\r", pkt->path[0]);
         }
         // If path has multiple hops, also track the last hop (direct neighbor)
         if (pkt->pathLen > 1) {
@@ -3185,7 +3158,7 @@ void processReceivedPacket(MCPacket* pkt) {
         bool isNew = seenNodes.update(hash, pkt->rssi, pkt->snr);
         if (isNew) {
             statsRecordUniqueNode();  // Persistent stats
-            LOG(TAG_NODE " New direct node detected: %02X\n\r", hash);
+            LOG(TAG_NODE " New %02X\n\r", hash);
         }
     }
 
@@ -3194,7 +3167,7 @@ void processReceivedPacket(MCPacket* pkt) {
         // Rate limit forwarding
         if (!repeaterHelper.allowForward()) {
             statsRecordRateLimited();  // Persistent stats
-            LOG(TAG_FWD " Forward rate limited\n\r");
+            LOG(TAG_FWD " Rate lim\n\r");
         } else {
             // Add our node hash to path (simplified: just add a byte)
             uint8_t myHash = (nodeId >> 24) ^ (nodeId >> 16) ^
@@ -3205,7 +3178,7 @@ void processReceivedPacket(MCPacket* pkt) {
             txQueue.add(pkt);
             fwdCount++;
             statsRecordFwd();  // Persistent stats
-            LOG(TAG_FWD " Queued for relay (path=%d)\n\r", pkt->pathLen);
+            LOG(TAG_FWD " Q p=%d\n\r", pkt->pathLen);
         }
     }
 }
@@ -3219,12 +3192,7 @@ void setup() {
     delay(1000);
 #endif
 
-    LOG_RAW("\n\r");
-    LOG_RAW(ANSI_CYAN "╔══════════════════════════════════════════════════════════╗\n\r");
-    LOG_RAW("║" ANSI_BOLD ANSI_WHITE "         CubeCellMeshCore Repeater v%s                 " ANSI_RESET ANSI_CYAN "║\n\r", FIRMWARE_VERSION);
-    LOG_RAW("║" ANSI_WHITE "         MeshCore Compatible - EU868 Region               " ANSI_CYAN "║\n\r");
-    LOG_RAW("╚══════════════════════════════════════════════════════════╝" ANSI_RESET "\n\r");
-    LOG_RAW("\n\r");
+    LOG_RAW("\n\rCubeCellMeshCore v%s EU868\n\r", FIRMWARE_VERSION);
 
     // Load configuration from EEPROM
     loadConfig();
@@ -3235,7 +3203,7 @@ void setup() {
     // Enable watchdog
 #if MC_WATCHDOG_ENABLED && defined(CUBECELL)
     innerWdtEnable(true);
-    LOG(TAG_SYSTEM " Watchdog timer enabled\n\r");
+    LOG(TAG_SYSTEM " WDT on\n\r");
 #endif
 
     // Generate node ID if not set
@@ -3245,33 +3213,33 @@ void setup() {
     LOG(TAG_SYSTEM " Node ID: %08lX\n\r", nodeId);
 
     // Initialize node identity (Ed25519 keys)
-    LOG(TAG_SYSTEM " Initializing identity...\n\r");
+    LOG(TAG_SYSTEM " Init ID...\n\r");
     if (nodeIdentity.begin()) {
-        LOG(TAG_OK " Identity ready: %s (hash: %02X)\n\r",
+        LOG(TAG_OK " ID: %s %02X\n\r",
             nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
     } else {
-        LOG(TAG_ERROR " Identity initialization failed!\n\r");
+        LOG(TAG_ERROR " ID init fail!\n\r");
     }
 
     // Initialize ADVERT generator with time sync
     advertGen.begin(&nodeIdentity, &timeSync);
     advertGen.setInterval(ADVERT_INTERVAL_MS);
     advertGen.setEnabled(ADVERT_ENABLED);
-    LOG(TAG_INFO " ADVERT beacon: %s (interval: %lus)\n\r",
-        ADVERT_ENABLED ? "enabled" : "disabled",
+    LOG(TAG_INFO " ADV: %s %lus\n\r",
+        ADVERT_ENABLED ? "on" : "off",
         ADVERT_INTERVAL_MS / 1000);
 
     // Initialize telemetry
     telemetry.begin(&rxCount, &txCount, &fwdCount, &errCount, &lastRssi, &lastSnr);
-    LOG(TAG_INFO " Telemetry initialized\n\r");
+    LOG(TAG_INFO " Telem OK\n\r");
 
     // Initialize repeater helper
     repeaterHelper.begin(&nodeIdentity);
-    LOG(TAG_INFO " Repeater helper initialized\n\r");
+    LOG(TAG_INFO " Repeater OK\n\r");
 
     // Initialize contact manager for direct messaging
     contactMgr.begin(&nodeIdentity);
-    LOG(TAG_INFO " Contact manager initialized\n\r");
+    LOG(TAG_INFO " Contacts OK\n\r");
 
     initLed();
     packetCache.clear();
@@ -3284,9 +3252,8 @@ void setup() {
     startReceive();
 
     bootTime = millis();
-    LOG(TAG_SYSTEM " Ready - listening for packets\n\r");
-    LOG(TAG_INFO " Serial console active for %d seconds\n\r", BOOT_SAFE_PERIOD_MS / 1000);
-    LOG(TAG_INFO " Waiting for time sync before sending ADVERT...\n\r");
+    LOG(TAG_SYSTEM " Ready\n\r");
+    LOG(TAG_INFO " Serial %ds, waiting time sync\n\r", BOOT_SAFE_PERIOD_MS / 1000);
 }
 
 void loop() {
@@ -3338,15 +3305,14 @@ void loop() {
                         processReceivedPacket(&pkt);
                     } else {
                         // Debug: show raw packet info
-                        LOG(TAG_ERROR " Invalid packet (len=%d hdr=0x%02X pL=%d pyL=%d)\n\r",
-                            len, buf[0], (len > 1) ? buf[1] : 0, (len > 2) ? buf[2] : 0);
+                        LOG(TAG_ERROR " Bad pkt l=%d h=%02X\n\r", len, buf[0]);
                         errCount++;
                     }
                 } else if (radioError == RADIOLIB_ERR_CRC_MISMATCH) {
-                    LOG(TAG_ERROR " CRC mismatch - packet discarded\n\r");
+                    LOG(TAG_ERROR " CRC err\n\r");
                     crcErrCount++;
                 } else {
-                    LOG(TAG_ERROR " RX error (code %d)\n\r", radioError);
+                    LOG(TAG_ERROR " RX err %d\n\r", radioError);
                     handleRadioError();
                 }
             }
@@ -3367,7 +3333,7 @@ void loop() {
         if (txQueue.pop(&pkt)) {
             // SNR-weighted delay (higher SNR = longer wait)
             uint32_t txDelay = MC_TX_DELAY_MIN + getTxDelayWeighted(lastSnr);
-            LOG(TAG_TX " Waiting %lums (backoff SNR=%ddB)\n\r", txDelay, lastSnr / 4);
+            LOG(TAG_TX " Wait %lums\n\r", txDelay);
 
             activeReceiveStart = 0;
             uint32_t start = millis();
@@ -3378,7 +3344,7 @@ void loop() {
 
                 // Check for new packet or active reception
                 if (dio1Flag || isActivelyReceiving()) {
-                    LOG(TAG_TX " Aborted - channel busy\n\r");
+                    LOG(TAG_TX " Busy\n\r");
                     txQueue.add(&pkt);  // Re-queue packet
                     aborted = true;
                     break;
