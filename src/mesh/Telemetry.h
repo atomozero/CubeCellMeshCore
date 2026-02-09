@@ -96,11 +96,23 @@ public:
 
     /**
      * Read battery voltage
-     * Uses CubeCell built-in getBatteryVoltage() from LoRaWan library
+     * Uses CubeCell ADC with voltage divider calibration
+     * Falls back to getBatteryVoltage() from LoRaWan library
      */
     void readBattery() {
         #ifdef CUBECELL
-        data.batteryMv = getBatteryVoltage();
+        // Try manual ADC reading first (more reliable)
+        uint16_t adcRaw = analogRead(VBAT_ADC_PIN);
+        float voltage = (adcRaw / ADC_RESOLUTION) * VBAT_REF * VBAT_DIVIDER;
+        uint16_t manualMv = (uint16_t)(voltage * 1000.0f);
+
+        // Use manual reading if it gives a plausible value (> 2V)
+        if (manualMv > 2000) {
+            data.batteryMv = manualMv;
+        } else {
+            // Fallback to library function
+            data.batteryMv = getBatteryVoltage();
+        }
         #else
         data.batteryMv = 0;
         #endif

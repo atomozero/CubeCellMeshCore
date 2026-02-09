@@ -616,13 +616,19 @@ private:
     RadioStats radioStats;
     uint32_t startTime;
 
+    // Airtime accumulators (sub-second precision)
+    uint32_t txAirTimeAccumMs;
+    uint32_t rxAirTimeAccumMs;
+
     // Configuration
     bool repeatEnabled;
     uint8_t maxFloodHops;
     bool rateLimitEnabled;
 
 public:
-    RepeaterHelper() : identity(nullptr), startTime(0), repeatEnabled(true), maxFloodHops(8),
+    RepeaterHelper() : identity(nullptr), startTime(0),
+                       txAirTimeAccumMs(0), rxAirTimeAccumMs(0),
+                       repeatEnabled(true), maxFloodHops(8),
                        rateLimitEnabled(true),
                        loginLimiter(RATE_LIMIT_LOGIN_MAX, RATE_LIMIT_LOGIN_SECS),
                        requestLimiter(RATE_LIMIT_REQUEST_MAX, RATE_LIMIT_REQUEST_SECS),
@@ -776,19 +782,41 @@ public:
     }
 
     /**
-     * Update radio statistics
+     * Update radio statistics including noise floor estimate
+     * Noise floor = RSSI - SNR (approximation for SX1262)
      */
     void updateRadioStats(int8_t rssi, int8_t snr) {
         radioStats.lastRssi = rssi;
         radioStats.lastSnr = snr;
+
+        // Estimate noise floor: RSSI - SNR (in dB)
+        // snr is stored as snr*4, so divide by 4 for actual dB
+        int16_t snrDb = snr / 4;
+        int16_t noiseEst = (int16_t)rssi - snrDb;
+
+        // Use exponential moving average to smooth noise floor
+        if (radioStats.noiseFloor == 0) {
+            radioStats.noiseFloor = noiseEst;
+        } else {
+            // EMA: new = old * 0.875 + sample * 0.125 (shift-based for efficiency)
+            radioStats.noiseFloor = (int16_t)(((int32_t)radioStats.noiseFloor * 7 + noiseEst) / 8);
+        }
     }
 
     void addTxAirTime(uint32_t ms) {
-        radioStats.txAirTimeSec += ms / 1000;
+        txAirTimeAccumMs += ms;
+        if (txAirTimeAccumMs >= 1000) {
+            radioStats.txAirTimeSec += txAirTimeAccumMs / 1000;
+            txAirTimeAccumMs %= 1000;
+        }
     }
 
     void addRxAirTime(uint32_t ms) {
-        radioStats.rxAirTimeSec += ms / 1000;
+        rxAirTimeAccumMs += ms;
+        if (rxAirTimeAccumMs >= 1000) {
+            radioStats.rxAirTimeSec += rxAirTimeAccumMs / 1000;
+            rxAirTimeAccumMs %= 1000;
+        }
     }
 
     /**

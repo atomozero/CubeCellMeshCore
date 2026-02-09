@@ -1019,10 +1019,12 @@ void processCommand(char* cmd) {
         LOG_RAW(ANSI_CYAN "┌────────────────────────────────┐\n\r");
         LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE "        RADIO STATISTICS        " ANSI_RESET ANSI_CYAN "│\n\r");
         LOG_RAW(ANSI_CYAN "├────────────────────────────────┤" ANSI_RESET "\n\r");
+        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Noise Floor " ANSI_YELLOW "%4d" ANSI_WHITE " dBm          " ANSI_RESET ANSI_CYAN "│\n\r", rs.noiseFloor);
         LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Last RSSI   " ANSI_GREEN "%4d" ANSI_WHITE " dBm          " ANSI_RESET ANSI_CYAN "│\n\r", rs.lastRssi);
         LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Last SNR    " ANSI_GREEN "%2d.%02d" ANSI_WHITE " dB          " ANSI_RESET ANSI_CYAN "│\n\r", rs.lastSnr / 4, abs(rs.lastSnr % 4) * 25);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " TX Airtime  " ANSI_YELLOW "%lu" ANSI_WHITE " sec           " ANSI_RESET ANSI_CYAN "│\n\r", rs.txAirTimeSec);
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " RX Airtime  " ANSI_YELLOW "%lu" ANSI_WHITE " sec           " ANSI_RESET ANSI_CYAN "│\n\r", rs.rxAirTimeSec);
+        LOG_RAW(ANSI_CYAN "├────────────────────────────────┤" ANSI_RESET "\n\r");
+        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " TX Airtime  " ANSI_YELLOW "%-14lu  " ANSI_RESET ANSI_CYAN "│\n\r", rs.txAirTimeSec);
+        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " RX Airtime  " ANSI_YELLOW "%-14lu  " ANSI_RESET ANSI_CYAN "│\n\r", rs.rxAirTimeSec);
         LOG_RAW(ANSI_CYAN "└────────────────────────────────┘" ANSI_RESET "\n\r");
     }
     else if (strcmp(cmd, "packetstats") == 0) {
@@ -1546,6 +1548,28 @@ void calculateTimings() {
         preambleTimeMsec, slotTimeMsec, maxPacketTimeMsec);
 }
 
+/**
+ * Calculate airtime for a given packet length using current LoRa parameters
+ * @param packetLen Total packet length in bytes (header + path + payload)
+ * @return Airtime in milliseconds
+ */
+uint32_t calculatePacketAirtime(uint16_t packetLen) {
+    float bwHz = getCurrentBandwidth() * 1000.0f;
+    uint8_t sf = getCurrentSpreadingFactor();
+    uint8_t cr = getCurrentCodingRate();
+    float tSymMs = (float)(1 << sf) / bwHz * 1000.0f;
+
+    // Preamble time
+    float preamble = (MC_PREAMBLE_LEN + 4.25f) * tSymMs;
+
+    // Payload symbols: 8 + max(ceil((8*PL - 4*SF + 28 + 16) / (4*SF)) * CR, 0)
+    float num = 8.0f * packetLen - 4.0f * sf + 28 + 16;
+    float den = 4.0f * sf;
+    float payloadSym = 8 + max(ceil(num / den) * cr, 0.0f);
+
+    return (uint32_t)(preamble + payloadSym * tSymMs) + 1;  // +1ms rounding
+}
+
 uint32_t getTxDelayWeighted(int8_t snr) {
     // High SNR = longer delay (let weaker nodes go first)
     // Low SNR = shorter delay (we might be far away)
@@ -1743,6 +1767,8 @@ bool transmitPacket(MCPacket* pkt) {
     if (irq & RADIOLIB_SX126X_IRQ_TX_DONE) {
         txCount++;
         statsRecordTx();  // Persistent stats
+        // Track TX airtime
+        repeaterHelper.addTxAirTime(calculatePacketAirtime(len));
         LOG(TAG_TX " Complete\n\r");
         ledOff();
         return true;
@@ -2698,8 +2724,16 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
 
         case REQ_TYPE_GET_TELEMETRY:
             {
+                telemetry.update();
                 CayenneLPP lpp(&responseData[responseLen], sizeof(responseData) - responseLen);
-                lpp.addAnalogInput(1, (float)seenNodes.getCount());
+                // Battery voltage (channel 1)
+                lpp.addVoltage(1, telemetry.getBatteryMv() / 1000.0f);
+                // Temperature (channel 2)
+                lpp.addTemperature(2, (float)telemetry.getTemperature());
+                // Node count as analog input (channel 3)
+                lpp.addAnalogInput(3, (float)seenNodes.getCount());
+                // Uptime as analog input in hours (channel 4)
+                lpp.addAnalogInput(4, telemetry.getUptime() / 3600.0f);
                 responseLen += lpp.getSize();
             }
             break;
@@ -3287,6 +3321,9 @@ void loop() {
                 if (radioError == RADIOLIB_ERR_NONE) {
                     radioErrorCount = 0;  // Reset error counter on success
 
+                    // Track RX airtime
+                    repeaterHelper.addRxAirTime(calculatePacketAirtime(len));
+
                     MCPacket pkt;
                     pkt.clear();
                     pkt.rxTime = millis();
@@ -3364,6 +3401,20 @@ void loop() {
 
     // Check if persistent stats need auto-save
     checkStatsSave();
+
+    // Periodic telemetry update (battery, temperature, stats)
+    if (telemetry.shouldUpdate()) {
+        telemetry.update();
+    }
+
+    // Periodic cleanup of expired neighbors (every 60 seconds)
+    {
+        static uint32_t lastCleanup = 0;
+        if (millis() - lastCleanup > 60000) {
+            repeaterHelper.cleanup();
+            lastCleanup = millis();
+        }
+    }
 
 #ifndef LITE_MODE
     // Check daily report scheduler

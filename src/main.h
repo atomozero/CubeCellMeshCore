@@ -363,6 +363,7 @@ void processReceivedPacket(MCPacket* pkt);
 bool shouldForward(MCPacket* pkt);
 uint32_t generateNodeId();
 void calculateTimings();
+uint32_t calculatePacketAirtime(uint16_t packetLen);
 uint32_t getTxDelayWeighted(int8_t snr);
 bool isActivelyReceiving();
 void feedWatchdog();
