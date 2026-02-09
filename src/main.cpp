@@ -32,9 +32,10 @@ uint8_t cmdPos = 0;
 // Minimal command handler - essential commands only
 void processCommand(char* cmd) {
     if (strcmp(cmd, "?") == 0 || strcmp(cmd, "help") == 0) {
-        LOG_RAW("status stats lifetime advert nodes contacts neighbours telemetry identity\n\r"
-                "name location time nodetype passwd sleep rxboost radio tempradio\n\r"
-                "ratelimit savestats alert newid reset save reboot\n\r");
+        LOG_RAW("status stats lifetime radiostats packetstats advert nodes contacts\n\r"
+                "neighbours telemetry identity name location time nodetype passwd\n\r"
+                "sleep rxboost radio tempradio ratelimit savestats alert newid\n\r"
+                "reset save reboot\n\r");
     }
     else if (strcmp(cmd, "status") == 0) {
         LOG_RAW("FW:%s Node:%s Hash:%02X\n\r", FIRMWARE_VERSION, nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
@@ -452,6 +453,18 @@ void processCommand(char* cmd) {
         } else {
             LOG_RAW("Tmp radio off\n\r");
         }
+    }
+    else if (strcmp(cmd, "radiostats") == 0) {
+        const RadioStats& rs = repeaterHelper.getRadioStats();
+        LOG_RAW("Noise:%ddBm RSSI:%d SNR:%d.%ddB\n\r",
+            rs.noiseFloor, rs.lastRssi, rs.lastSnr/4, abs(rs.lastSnr%4)*25);
+        LOG_RAW("Airtime TX:%lus RX:%lus\n\r", rs.txAirTimeSec, rs.rxAirTimeSec);
+    }
+    else if (strcmp(cmd, "packetstats") == 0) {
+        const PacketStats& ps = repeaterHelper.getPacketStats();
+        LOG_RAW("RX:%lu TX:%lu\n\r", ps.numRecvPackets, ps.numSentPackets);
+        LOG_RAW("Flood RX:%lu TX:%lu Direct RX:%lu TX:%lu\n\r",
+            ps.numRecvFlood, ps.numSentFlood, ps.numRecvDirect, ps.numSentDirect);
     }
     else if (strcmp(cmd, "reset") == 0) {
         resetConfig();
@@ -1334,6 +1347,24 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     else if (strcmp(cmd, "advert interval") == 0) {
         RESP_APPEND("Int:%lus next:%lus\n", advertGen.getInterval() / 1000, advertGen.getTimeUntilNext());
     }
+    else if (strcmp(cmd, "radiostats") == 0) {
+        const RadioStats& rs = repeaterHelper.getRadioStats();
+        RESP_APPEND("Noise:%ddBm RSSI:%d SNR:%d.%ddB\n",
+            rs.noiseFloor, rs.lastRssi, rs.lastSnr/4, abs(rs.lastSnr%4)*25);
+        RESP_APPEND("Airtime TX:%lus RX:%lus\n", rs.txAirTimeSec, rs.rxAirTimeSec);
+    }
+    else if (strcmp(cmd, "packetstats") == 0) {
+        const PacketStats& ps = repeaterHelper.getPacketStats();
+        RESP_APPEND("RX:%lu TX:%lu\n", ps.numRecvPackets, ps.numSentPackets);
+        RESP_APPEND("FL RX:%lu TX:%lu DR RX:%lu TX:%lu\n",
+            ps.numRecvFlood, ps.numSentFlood, ps.numRecvDirect, ps.numSentDirect);
+    }
+    else if (strcmp(cmd, "lifetime") == 0) {
+        const PersistentStats* ps = getPersistentStats();
+        RESP_APPEND("Boots:%u RX:%lu TX:%lu FWD:%lu Nodes:%lu\n",
+            ps->bootCount, ps->totalRxPackets, ps->totalTxPackets,
+            ps->totalFwdPackets, ps->totalUniqueNodes);
+    }
 
     // === Admin-only commands ===
 
@@ -1438,7 +1469,7 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
         // (handled by caller)
     }
     else if (strcmp(cmd, "help") == 0) {
-        RESP_APPEND("status stats time telemetry nodes neighbours repeat identity location\n"
+        RESP_APPEND("status stats lifetime radiostats packetstats telemetry nodes neighbours identity\n"
                     "admin: set repeat/password/guest/flood.max name location advert save reset reboot\n");
     }
     else {

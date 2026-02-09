@@ -19,8 +19,8 @@ MeshCore-compatible repeater firmware for Heltec CubeCell HTCC-AB01.
 
 - **Board**: Heltec CubeCell HTCC-AB01
 - **Radio**: SX1262 LoRa transceiver
-- **Flash**: 131KB (95.8% used)
-- **RAM**: 16KB (49.4% used)
+- **Flash**: 131KB (96.3% used)
+- **RAM**: 16KB (51.3% used)
 
 ## Quick Start
 
@@ -45,31 +45,85 @@ Default settings (EU868):
 
 | Parameter | Value |
 |-----------|-------|
-| Frequency | 869.525 MHz |
+| Frequency | 869.618 MHz |
 | Bandwidth | 62.5 kHz |
 | Spreading Factor | SF8 |
 | Coding Rate | 4/8 |
-| TX Power | 22 dBm |
-| Sync Word | 0x24 |
+| TX Power | 14 dBm |
+| Sync Word | 0x12 |
 
 ## Serial Commands
 
-Type `help` for full command list. Key commands:
+Connect at 115200 baud. Type `help` for command list.
 
-```
-status          - System status
-stats           - Packet statistics
-advert          - Send ADVERT now
-nodes           - List discovered nodes
-neighbours      - List direct repeater neighbours
-contacts        - List known contacts
-identity        - Show public key
-telemetry       - Battery, node stats
-name <name>     - Set node name
-location <lat> <lon> - Set GPS coords
-save            - Save to EEPROM
-reboot          - Restart device
-```
+### Status & Info
+
+| Command | Description |
+|---------|-------------|
+| `status` | Firmware, frequency, time sync, RSSI/SNR |
+| `stats` | Session counters: RX/TX/FWD/ERR, ADV, queue |
+| `lifetime` | Persistent stats: boots, totals, logins |
+| `radiostats` | Noise floor, last RSSI/SNR, airtime TX/RX |
+| `packetstats` | Packet breakdown: flood/direct RX/TX |
+| `telemetry` | Battery mV/%, temperature, uptime |
+| `identity` | Node name, hash, public key |
+| `nodes` | Discovered nodes (hash, name, RSSI) |
+| `contacts` | Known contacts with public keys |
+| `neighbours` | Direct repeater neighbours (0-hop) |
+
+### Configuration
+
+| Command | Description |
+|---------|-------------|
+| `name <name>` | Set node name (1-15 chars) |
+| `location <lat> <lon>` | Set GPS coordinates |
+| `location` | Show current location |
+| `location clear` | Clear location |
+| `time [timestamp]` | Show or set Unix time |
+| `nodetype chat\|repeater` | Set node type |
+| `passwd` | Show admin/guest passwords |
+| `passwd admin <pwd>` | Set admin password |
+| `passwd guest <pwd>` | Set guest password |
+| `sleep on\|off` | Enable/disable deep sleep |
+| `rxboost on\|off` | Enable/disable RX gain boost |
+
+### Radio
+
+| Command | Description |
+|---------|-------------|
+| `radio` | Show current radio parameters |
+| `tempradio <freq> <bw> <sf> <cr>` | Set temporary radio params |
+| `tempradio off` | Revert to default radio config |
+
+### ADVERT & Alerts
+
+| Command | Description |
+|---------|-------------|
+| `advert` | Send ADVERT beacon now |
+| `advert interval [sec]` | Show or set beacon interval |
+| `alert` | Show alert status |
+| `alert on\|off` | Enable/disable node alerts |
+| `alert dest <name\|pubkey>` | Set alert destination |
+| `alert clear` | Clear alert config |
+| `alert test` | Send test alert |
+
+### Rate Limiting
+
+| Command | Description |
+|---------|-------------|
+| `ratelimit` | Show rate limit stats |
+| `ratelimit on\|off` | Enable/disable rate limiting |
+| `ratelimit reset` | Reset rate limit counters |
+
+### System
+
+| Command | Description |
+|---------|-------------|
+| `savestats` | Save statistics to EEPROM |
+| `newid` | Generate new Ed25519 identity |
+| `save` | Save config to EEPROM |
+| `reset` | Reset config to factory defaults |
+| `reboot` | Restart device |
 
 ## Project Structure
 

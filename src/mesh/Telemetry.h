@@ -6,13 +6,8 @@
  * Reads battery voltage, temperature, and system stats
  */
 
-// CubeCell ADC configuration
-#ifdef CUBECELL
-#define VBAT_ADC_PIN    ADC    // Built-in battery ADC
-#define VBAT_DIVIDER    2.0f   // Voltage divider ratio
-#define VBAT_REF        2.4f   // Reference voltage
-#define ADC_RESOLUTION  4096.0f // 12-bit ADC
-#endif
+// CubeCell battery ADC workaround for framework 1.6.0
+// getBatteryVoltage()/analogReadmV() broken: ch3 calibration not initialized
 
 /**
  * Telemetry data structure
@@ -95,23 +90,33 @@ public:
     }
 
     /**
-     * Read battery voltage
-     * Uses CubeCell ADC with voltage divider calibration
-     * Falls back to getBatteryVoltage() from LoRaWan library
+     * Read battery voltage.
+     * Framework 1.6.0 bugs: analogReadmV()/getBatteryVoltage() broken
+     * (ch3 calibration not initialized).
+     * Workaround: analogRead() + ch0 calibration + VBAT_ADC_CTL.
      */
     void readBattery() {
         #ifdef CUBECELL
-        // Try manual ADC reading first (more reliable)
-        uint16_t adcRaw = analogRead(VBAT_ADC_PIN);
-        float voltage = (adcRaw / ADC_RESOLUTION) * VBAT_REF * VBAT_DIVIDER;
-        uint16_t manualMv = (uint16_t)(voltage * 1000.0f);
+        extern volatile int16 ADC_SAR_Seq_offset[];
+        extern volatile int32 ADC_SAR_Seq_countsPer10Volt[];
 
-        // Use manual reading if it gives a plausible value (> 2V)
-        if (manualMv > 2000) {
-            data.batteryMv = manualMv;
+        // Enable VBAT measurement circuit
+        pinMode(VBAT_ADC_CTL, OUTPUT);
+        digitalWrite(VBAT_ADC_CTL, LOW);
+        delay(100);
+
+        uint16_t counts = analogRead(ADC);
+
+        pinMode(VBAT_ADC_CTL, INPUT);
+
+        // Convert using ch0 calibration, apply x2 voltage divider
+        int32_t gain = ADC_SAR_Seq_countsPer10Volt[0];
+        if (gain != 0) {
+            int32_t adj = (int32_t)counts - ADC_SAR_Seq_offset[0];
+            float pinMv = ((float)adj * 10000.0f) / (float)gain;
+            data.batteryMv = (uint16_t)(pinMv * 2.0f);
         } else {
-            // Fallback to library function
-            data.batteryMv = getBatteryVoltage();
+            data.batteryMv = 0;
         }
         #else
         data.batteryMv = 0;
