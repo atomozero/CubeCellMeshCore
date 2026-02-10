@@ -799,6 +799,10 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
             RESP_APPEND("name=%s\n", newName);
         } else RESP_APPEND("E:1-15\n");
     }
+    else if (strcmp(cmd, "location clear") == 0) {
+        nodeIdentity.clearLocation();
+        RESP_APPEND("loc clr\n");
+    }
     else if (strncmp(cmd, "location ", 9) == 0) {
         float lat, lon;
         if (sscanf(cmd + 9, "%f %f", &lat, &lon) == 2 &&
@@ -806,10 +810,6 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
             nodeIdentity.setLocation(lat, lon);
             RESP_APPEND("%.6f,%.6f\n", lat, lon);
         } else RESP_APPEND("E:loc\n");
-    }
-    else if (strcmp(cmd, "location clear") == 0) {
-        nodeIdentity.clearLocation();
-        RESP_APPEND("loc clr\n");
     }
     else if (strncmp(cmd, "advert interval ", 16) == 0) {
         uint32_t interval = strtoul(cmd + 16, NULL, 10);
