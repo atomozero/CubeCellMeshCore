@@ -1,10 +1,10 @@
 # CubeCellMeshCore Memory Optimization Guide
 
 ## Current Status (After Optimizations)
-- **Flash**: 128,280 / 131,072 bytes (97.9%)
-- **RAM**: 8,088 / 16,384 bytes (49.4%)
-- **Available**: ~2,792 bytes Flash
-- **Saved**: 2,024 bytes Flash, 16 bytes RAM
+- **Flash**: 129,388 / 131,072 bytes (98.7%)
+- **RAM**: 8,136 / 16,384 bytes (49.7%)
+- **Available**: ~1,684 bytes Flash
+- **Daily Report**: Enabled via `#define ENABLE_DAILY_REPORT`
 
 ## Implemented Optimizations
 
@@ -16,8 +16,12 @@
 | OPT-4 | ANSI_COLORS disabled by default | 920 bytes Flash | ✅ Done |
 | OPT-5 | Fancy display already disabled via LITE_MODE | N/A | ✅ Already |
 | OPT-6 | Help strings compacted | 120 bytes Flash | ✅ Done |
+| OPT-7 | RadioLib exclude unused modules/protocols | 776 bytes Flash, 280 bytes RAM | ✅ Done |
+| OPT-8 | ANSI box-drawing tables removed (single processCommand) | N/A (dead code) | ✅ Done |
+| OPT-9 | Daily report separated from LITE_MODE (`ENABLE_DAILY_REPORT`) | Independent flag | ✅ Done |
 
-**Total Implemented: 2,024 bytes Flash + 16 bytes RAM**
+**Total Implemented: 2,800 bytes Flash + 296 bytes RAM saved**
+**Daily report enabled, adding ~1,912 bytes Flash (net from 127,476 baseline)**
 
 ---
 
@@ -55,7 +59,15 @@ LOG(TAG_OK " %S\n\r", MSG_RX_BOOST);  // %S for PROGMEM strings
 
 ### 3. ✅ DONE - ANSI Color Codes disabled via ANSI_COLORS flag
 
-### 4. ✅ DONE - Fancy Display already disabled via LITE_MODE + MINIMAL_DEBUG
+### 4. ✅ DONE - ANSI box-drawing tables removed
+The dual `processCommand()` (minimal + fancy ANSI) was consolidated into a single compact version.
+All ANSI box-drawing characters (`┌─┐│└─┘├┤`) removed from the codebase.
+
+### 4b. ✅ DONE - RadioLib unused modules excluded
+Added `-D RADIOLIB_EXCLUDE_*` flags in `platformio.ini` for all unused radio modules (CC1101, NRF24, RF69, SX1231, SI443X, RFM2X, SX127X, SX128X, LR11X0, STM32WLX) and protocols (AFSK, AX25, Hellschreiber, Morse, RTTY, SSTV, APRS, FSK4, Pager, Bell, DirectReceive, LoRaWAN). Saved 776 bytes Flash.
+
+### 4c. ✅ DONE - Daily report separated from LITE_MODE
+Added `#define ENABLE_DAILY_REPORT` flag independent of LITE_MODE. Daily report functionality (generateReportContent, sendDailyReport, checkDailyReport, serial commands) now has its own compile flag.
 
 ### 5. ✅ DONE - Test Vectors wrapped in ENABLE_CRYPTO_TESTS
 
@@ -181,16 +193,22 @@ const char STR_SAVED[] PROGMEM = "Saved to EEPROM";
 4. ✅ ANSI_COLORS disabled (-920 bytes)
 5. ✅ Help strings compacted (-120 bytes)
 
-### Phase 2: Future Optimization (if needed)
+### Phase 2: RadioLib + ANSI Cleanup ✅ COMPLETED
+1. ✅ RadioLib exclude unused modules (-776 bytes Flash, -280 bytes RAM)
+2. ✅ ANSI box-drawing tables removed (single compact processCommand)
+3. ✅ Daily report enabled via `ENABLE_DAILY_REPORT` flag
+
+### Phase 3: Future Optimization (if needed)
 1. Create PROGMEM string table for LOG messages (~2KB)
 2. Reduce array sizes (MAX_NEIGHBOURS, MC_MAX_CONTACTS) (~500 bytes RAM)
-3. Feature flags for DAILY_REPORT, REMOTE_CLI (~1KB each)
+3. Feature flag for REMOTE_CLI (~1KB)
 
 ### Results Achieved
-- **Before**: Flash 130,304 bytes (99.4%), RAM 8,104 bytes (49.5%)
-- **After**: Flash 128,280 bytes (97.9%), RAM 8,088 bytes (49.4%)
-- **Saved**: 2,024 bytes Flash, 16 bytes RAM
-- **Available**: ~2,792 bytes Flash for new features
+- **Baseline**: Flash 127,476 bytes (97.3%), RAM 8,408 bytes (51.3%)
+- **After RadioLib exclusion**: Flash 126,700 bytes (96.7%), RAM 8,128 bytes (49.6%)
+- **After ANSI removal + new commands**: Flash 127,804 bytes (97.5%)
+- **After daily report enabled**: Flash 129,388 bytes (98.7%), RAM 8,136 bytes (49.7%)
+- **Available**: ~1,684 bytes Flash
 
 ---
 
