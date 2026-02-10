@@ -854,9 +854,9 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
 //=============================================================================
 void applyPowerSettings() {
     radio.setRxBoostedGainMode(rxBoostEnabled, true);
-    LOG(TAG_CONFIG " RxBoost=%s DeepSleep=%s Mode=%d\n\r",
-        rxBoostEnabled ? "ON" : "OFF",
-        deepSleepEnabled ? "ON" : "OFF",
+    LOG(TAG_CONFIG " RxB=%s DS=%s M=%d\n\r",
+        rxBoostEnabled ? "1" : "0",
+        deepSleepEnabled ? "1" : "0",
         powerSaveMode);
 }
 
@@ -925,7 +925,7 @@ void calculateTimings() {
     float totalSymbols = (MC_PREAMBLE_LEN + 4.25f) + numPayloadSym;
     maxPacketTimeMsec = (uint32_t)(totalSymbols * tSymMs) + 50;  // +50ms margin
 
-    LOG(TAG_RADIO " Timing: preamble=%lums slot=%lums max_pkt=%lums\n\r",
+    LOG(TAG_RADIO " T: p=%lu s=%lu m=%lu\n\r",
         preambleTimeMsec, slotTimeMsec, maxPacketTimeMsec);
 }
 
@@ -1632,8 +1632,7 @@ bool processDiscoverRequest(MCPacket* pkt) {
         return false;
     }
 
-    LOG(TAG_DISCOVERY " DISC_REQ f=%02X t=%08lX\n\r",
-        typeFilter, requestTag);
+    LOG(TAG_DISCOVERY " REQ %02X\n\r", typeFilter);
 
     // Build discover response
     MCPacket respPkt;
@@ -1676,7 +1675,7 @@ bool processDiscoverRequest(MCPacket* pkt) {
     uint32_t baseDelay = getTxDelayWeighted(pkt->snr);
     uint32_t randomDelay = random(baseDelay * 2, baseDelay * 6);
 
-    LOG(TAG_DISCOVERY " DISC_RESP d=%lums\n\r", randomDelay);
+    LOG(TAG_DISCOVERY " RESP %lums\n\r", randomDelay);
 
     // Queue with delay
     delay(randomDelay);
@@ -1720,7 +1719,7 @@ bool processTxtMsgCLI(MCPacket* pkt) {
         return false;  // Not for us
     }
 
-    LOG(TAG_AUTH " TXT_MSG from %02X\n\r", srcHash);
+    LOG(TAG_AUTH " TXT %02X\n\r", srcHash);
 
     // Find client session by src_hash
     ClientSession* session = nullptr;
@@ -1768,7 +1767,7 @@ bool processTxtMsgCLI(MCPacket* pkt) {
     uint8_t txtTypeByte = decrypted[4];
     uint8_t txtType = (txtTypeByte >> 2) & 0x3F;  // Upper 6 bits
 
-    LOG(TAG_AUTH " TXT type=%d len=%d\n\r", txtType, decryptedLen);
+    LOG(TAG_AUTH " TXT t=%d l=%d\n\r", txtType, decryptedLen);
 
     // Only process CLI commands (TXT_TYPE_CLI = 0x01)
     if (txtType != TXT_TYPE_CLI) {
@@ -1795,7 +1794,7 @@ bool processTxtMsgCLI(MCPacket* pkt) {
         cmdStr[--cmdLen] = '\0';
     }
 
-    LOG(TAG_AUTH " CLI cmd: '%s'\n\r", cmdStr);
+    LOG(TAG_AUTH " CLI: %s\n\r", cmdStr);
 
     // Process command
     char cliResponse[96];
@@ -1850,7 +1849,7 @@ bool processTxtMsgCLI(MCPacket* pkt) {
         rebootTime = millis() + 500;
     }
 
-    LOG(TAG_AUTH " CLI resp %dB\n\r", respPkt.payloadLen);
+    LOG(TAG_AUTH " Resp %dB\n\r", respPkt.payloadLen);
     return true;
 }
 
@@ -2464,7 +2463,7 @@ void setup() {
     LOG(TAG_SYSTEM " Node ID: %08lX\n\r", nodeId);
 
     // Initialize node identity (Ed25519 keys)
-    LOG(TAG_SYSTEM " Init ID...\n\r");
+    LOG(TAG_SYSTEM " Init ID\n\r");
     if (nodeIdentity.begin()) {
         LOG(TAG_OK " ID: %s %02X\n\r",
             nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
@@ -2482,15 +2481,11 @@ void setup() {
 
     // Initialize telemetry
     telemetry.begin(&rxCount, &txCount, &fwdCount, &errCount, &lastRssi, &lastSnr);
-    LOG(TAG_INFO " Telem OK\n\r");
-
     // Initialize repeater helper
     repeaterHelper.begin(&nodeIdentity);
-    LOG(TAG_INFO " Repeater OK\n\r");
 
     // Initialize contact manager for direct messaging
     contactMgr.begin(&nodeIdentity);
-    LOG(TAG_INFO " Contacts OK\n\r");
 
     initLed();
     packetCache.clear();
@@ -2504,7 +2499,7 @@ void setup() {
 
     bootTime = millis();
     LOG(TAG_SYSTEM " Ready\n\r");
-    LOG(TAG_INFO " Serial %ds, waiting time sync\n\r", BOOT_SAFE_PERIOD_MS / 1000);
+    LOG(TAG_INFO " Boot %ds\n\r", BOOT_SAFE_PERIOD_MS / 1000);
 }
 
 void loop() {
