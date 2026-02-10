@@ -12,7 +12,6 @@
 //=============================================================================
 // Forward declarations
 //=============================================================================
-void sendAdvertNoFlags();
 #ifndef LITE_MODE
 void sendDirectMessage(const char* recipientName, const char* message);
 #endif
@@ -34,7 +33,7 @@ void processCommand(char* cmd) {
         LOG_RAW("status stats lifetime radiostats packetstats advert nodes contacts\n\r"
                 "neighbours telemetry identity name location time nodetype passwd\n\r"
                 "sleep rxboost radio tempradio ratelimit savestats alert newid\n\r"
-                "power acl battdebug repeat ping rssi mode set report\n\r"
+                "power acl repeat ping rssi mode set report\n\r"
                 "reset save reboot\n\r");
     }
     else if (strcmp(cmd, "status") == 0) {
@@ -57,7 +56,7 @@ void processCommand(char* cmd) {
     }
     else if (strcmp(cmd, "savestats") == 0) {
         savePersistentStats();
-        LOG_RAW("Stats saved to EEPROM\n\r");
+        LOG_RAW("Stats saved\n\r");
     }
     else if (strcmp(cmd, "ratelimit") == 0) {
         LOG_RAW("RateLimit: %s\n\r", repeaterHelper.isRateLimitEnabled() ? "ON" : "OFF");
@@ -69,13 +68,13 @@ void processCommand(char* cmd) {
     else if (strncmp(cmd, "ratelimit ", 10) == 0) {
         if (strcmp(cmd + 10, "on") == 0) {
             repeaterHelper.setRateLimitEnabled(true);
-            LOG_RAW("RateLimit enabled\n\r");
+            LOG_RAW("RateLimit ON\n\r");
         } else if (strcmp(cmd + 10, "off") == 0) {
             repeaterHelper.setRateLimitEnabled(false);
-            LOG_RAW("RateLimit disabled\n\r");
+            LOG_RAW("RateLimit OFF\n\r");
         } else if (strcmp(cmd + 10, "reset") == 0) {
             repeaterHelper.resetRateLimitStats();
-            LOG_RAW("RateLimit stats reset\n\r");
+            LOG_RAW("RateLimit reset\n\r");
         }
     }
     else if (strcmp(cmd, "advert") == 0) {
@@ -341,6 +340,7 @@ void processCommand(char* cmd) {
         LOG_RAW("RX:%lu TX:%lu FWD:%lu ERR:%lu\n\r",
             t->rxCount, t->txCount, t->fwdCount, t->errorCount);
     }
+    #ifdef ENABLE_BATTDEBUG
     else if (strcmp(cmd, "battdebug") == 0) {
         #ifdef CUBECELL
         extern volatile int16 ADC_SAR_Seq_offset[];
@@ -352,31 +352,24 @@ void processCommand(char* cmd) {
         pinMode(VBAT_ADC_CTL, INPUT);
         LOG_RAW("ADC raw=%u\n\r", r);
         LOG_RAW("ch0 off=%d gain=%ld\n\r", ADC_SAR_Seq_offset[0], (long)ADC_SAR_Seq_countsPer10Volt[0]);
-        LOG_RAW("ch3 off=%d gain=%ld\n\r", ADC_SAR_Seq_offset[3], (long)ADC_SAR_Seq_countsPer10Volt[3]);
         int32_t g0 = ADC_SAR_Seq_countsPer10Volt[0];
         if (g0 != 0) {
             float mv = ((float)((int32_t)r - ADC_SAR_Seq_offset[0]) * 10000.0f) / (float)g0;
-            LOG_RAW("ch0 cal: pin=%.0fmV batt=%.0fmV\n\r", mv, mv * 2.0f);
+            LOG_RAW("cal: batt=%.0fmV\n\r", mv * 2.0f);
         }
-        uint16_t rawMv = (uint32_t)r * 2400 * 2 / 4095;
-        LOG_RAW("Raw no cal: batt=%umV\n\r", rawMv);
         telemetry.update();
         LOG_RAW("Telemetry: %dmV (%d%%)\n\r", telemetry.getBatteryMv(), telemetry.getBatteryPercent());
-        #else
-        LOG_RAW("Not CubeCell\n\r");
         #endif
     }
+    #endif
     else if (strcmp(cmd, "alert") == 0) {
         bool keySet = false;
         for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
             if (alertDestPubKey[i] != 0) { keySet = true; break; }
         }
-        LOG_RAW("Alert: %s  Dest: %s\n\r",
+        LOG_RAW("Alert:%s Dest:%s\n\r",
             alertEnabled ? "ON" : "OFF",
-            keySet ? "set" : "not set");
-        if (keySet) {
-            LOG_RAW("  Hash: %02X\n\r", alertDestPubKey[0]);
-        }
+            keySet ? "set" : "none");
     }
     else if (strcmp(cmd, "alert on") == 0) {
         bool keySet = false;
@@ -386,15 +379,15 @@ void processCommand(char* cmd) {
         if (keySet) {
             alertEnabled = true;
             saveConfig();
-            LOG_RAW("Node alert: ON\n\r");
+            LOG_RAW("Alert ON\n\r");
         } else {
-            LOG_RAW("Set dest first: alert dest <key>\n\r");
+            LOG_RAW("No dest\n\r");
         }
     }
     else if (strcmp(cmd, "alert off") == 0) {
         alertEnabled = false;
         saveConfig();
-        LOG_RAW("Node alert: OFF\n\r");
+        LOG_RAW("Alert OFF\n\r");
     }
     else if (strncmp(cmd, "alert dest ", 11) == 0) {
         const char* arg = cmd + 11;
@@ -403,7 +396,7 @@ void processCommand(char* cmd) {
         if (c) {
             memcpy(alertDestPubKey, c->pubKey, REPORT_PUBKEY_SIZE);
             saveConfig();
-            LOG_RAW("Alert dest: %s (%02X)\n\r", c->name, alertDestPubKey[0]);
+            LOG_RAW("Dest:%s(%02X)\n\r", c->name, alertDestPubKey[0]);
         }
         // Otherwise try hex pubkey (64 chars = 32 bytes)
         else if (strlen(arg) >= 64) {
@@ -412,11 +405,11 @@ void processCommand(char* cmd) {
                 alertDestPubKey[i] = strtoul(byte, NULL, 16);
             }
             saveConfig();
-            LOG_RAW("Alert dest set: %02X%02X%02X%02X...\n\r",
+            LOG_RAW("Dest:%02X%02X%02X%02X\n\r",
                 alertDestPubKey[0], alertDestPubKey[1],
                 alertDestPubKey[2], alertDestPubKey[3]);
         } else {
-            LOG_RAW("Contact '%s' not found\n\r", arg);
+            LOG_RAW("'%s' not found\n\r", arg);
         }
     }
     else if (strcmp(cmd, "alert clear") == 0) {
@@ -770,103 +763,86 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
 
     else if (strcmp(cmd, "set repeat on") == 0) {
         repeaterHelper.setRepeatEnabled(true);
-        RESP_APPEND("OK: repeat on\n");
+        RESP_APPEND("rpt:on\n");
     }
     else if (strcmp(cmd, "set repeat off") == 0) {
         repeaterHelper.setRepeatEnabled(false);
-        RESP_APPEND("OK: repeat off\n");
+        RESP_APPEND("rpt:off\n");
     }
     else if (strncmp(cmd, "set flood.max ", 14) == 0) {
         uint8_t hops = atoi(cmd + 14);
         if (hops >= 1 && hops <= 15) {
             repeaterHelper.setMaxFloodHops(hops);
-            RESP_APPEND("OK: flood.max %d\n", hops);
-        } else {
-            RESP_APPEND("Error: 1-15\n");
-        }
+            RESP_APPEND("hops:%d\n", hops);
+        } else RESP_APPEND("E:1-15\n");
     }
     else if (strncmp(cmd, "set password ", 13) == 0) {
         const char* pwd = cmd + 13;
         if (strlen(pwd) > 0 && strlen(pwd) <= 15) {
             sessionManager.setAdminPassword(pwd);
             saveConfig();
-            RESP_APPEND("OK: password set\n");
-        } else {
-            RESP_APPEND("Error: 1-15 chars\n");
-        }
+            RESP_APPEND("pwd set\n");
+        } else RESP_APPEND("E:1-15\n");
     }
     else if (strncmp(cmd, "set guest ", 10) == 0) {
         const char* pwd = cmd + 10;
         if (strlen(pwd) <= 15) {
             sessionManager.setGuestPassword(pwd);
             saveConfig();
-            RESP_APPEND("OK: guest set\n");
-        } else {
-            RESP_APPEND("Error: 0-15 chars\n");
-        }
+            RESP_APPEND("guest set\n");
+        } else RESP_APPEND("E:0-15\n");
     }
     else if (strncmp(cmd, "name ", 5) == 0) {
         const char* newName = cmd + 5;
         if (strlen(newName) > 0 && strlen(newName) < MC_NODE_NAME_MAX) {
             nodeIdentity.setNodeName(newName);
-            RESP_APPEND("OK: name=%s\n", newName);
-        } else {
-            RESP_APPEND("Error: 1-15 chars\n");
-        }
+            RESP_APPEND("name=%s\n", newName);
+        } else RESP_APPEND("E:1-15\n");
     }
     else if (strncmp(cmd, "location ", 9) == 0) {
         float lat, lon;
-        if (sscanf(cmd + 9, "%f %f", &lat, &lon) == 2) {
-            if (lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
-                nodeIdentity.setLocation(lat, lon);
-                RESP_APPEND("OK: %.6f,%.6f\n", lat, lon);
-            } else {
-                RESP_APPEND("Error: invalid coords\n");
-            }
-        } else {
-            RESP_APPEND("Error: location LAT LON\n");
-        }
+        if (sscanf(cmd + 9, "%f %f", &lat, &lon) == 2 &&
+            lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+            nodeIdentity.setLocation(lat, lon);
+            RESP_APPEND("%.6f,%.6f\n", lat, lon);
+        } else RESP_APPEND("E:loc\n");
     }
     else if (strcmp(cmd, "location clear") == 0) {
         nodeIdentity.clearLocation();
-        RESP_APPEND("OK:loc cleared\n");
+        RESP_APPEND("loc clr\n");
     }
     else if (strncmp(cmd, "advert interval ", 16) == 0) {
         uint32_t interval = strtoul(cmd + 16, NULL, 10);
         if (interval >= 60 && interval <= 86400) {
             advertGen.setInterval(interval * 1000);
-            RESP_APPEND("OK: interval %lus\n", interval);
-        } else {
-            RESP_APPEND("Error: 60-86400\n");
-        }
+            RESP_APPEND("int:%lus\n", interval);
+        } else RESP_APPEND("E:60-86400\n");
     }
     else if (strcmp(cmd, "advert") == 0) {
         sendAdvert(true);
-        RESP_APPEND("OK: advert sent\n");
+        RESP_APPEND("adv sent\n");
     }
     else if (strcmp(cmd, "advert local") == 0) {
         sendAdvert(false);
-        RESP_APPEND("OK:adv local\n");
+        RESP_APPEND("adv local\n");
     }
     else if (strcmp(cmd, "save") == 0) {
         saveConfig();
-        RESP_APPEND("OK: config saved\n");
+        RESP_APPEND("saved\n");
     }
     else if (strcmp(cmd, "reset") == 0) {
         resetConfig();
-        RESP_APPEND("OK: config reset\n");
+        RESP_APPEND("reset\n");
     }
     else if (strcmp(cmd, "reboot") == 0) {
-        RESP_APPEND("OK: rebooting...\n");
-        // Schedule reboot after response is sent
-        // (handled by caller)
+        RESP_APPEND("reboot\n");
     }
     else if (strcmp(cmd, "help") == 0) {
         RESP_APPEND("status stats lifetime radiostats packetstats telemetry nodes neighbours identity\n"
-                    "admin: set repeat/password/guest/flood.max name location advert save reset reboot\n");
+                    "set repeat/password/guest/flood.max name location advert save reset reboot\n");
     }
     else {
-        RESP_APPEND("Err:unknown\n");
+        RESP_APPEND("E:?\n");
     }
 
     #undef RESP_APPEND
@@ -1226,85 +1202,6 @@ void sendPing() {
 // ADVERT Beacon
 //=============================================================================
 
-/**
- * Send ADVERT without flags byte (to match buggy MeshCore firmware format)
- * Appdata format: [name] only (no flags, no location)
- */
-void sendAdvertNoFlags() {
-    if (!nodeIdentity.isInitialized()) {
-        LOG(TAG_ERROR " No ID\n\r");
-        return;
-    }
-
-    if (!timeSync.isSynchronized()) {
-        LOG(TAG_ERROR " No time sync\n\r");
-        return;
-    }
-
-    MCPacket pkt;
-    pkt.clear();
-
-    // Set header: FLOOD + ADVERT type
-    pkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_ADVERT, MC_PAYLOAD_VER_1);
-    pkt.pathLen = 0;
-
-    uint8_t* payload = pkt.payload;
-    uint16_t pos = 0;
-
-    // [0-31] Public Key
-    memcpy(&payload[pos], nodeIdentity.getPublicKey(), MC_PUBLIC_KEY_SIZE);
-    pos += MC_PUBLIC_KEY_SIZE;
-
-    // [32-35] Timestamp
-    uint32_t timestamp = timeSync.getTimestamp();
-    payload[pos++] = timestamp & 0xFF;
-    payload[pos++] = (timestamp >> 8) & 0xFF;
-    payload[pos++] = (timestamp >> 16) & 0xFF;
-    payload[pos++] = (timestamp >> 24) & 0xFF;
-
-    // Build appdata WITHOUT flags byte - just the name
-    uint8_t appdata[32];
-    const char* name = nodeIdentity.getNodeName();
-    uint8_t nameLen = strlen(name);
-    memcpy(appdata, name, nameLen);
-    uint8_t appdataLen = nameLen;
-
-    // Calculate signature over: pubkey + timestamp + appdata
-    uint8_t signData[MC_PUBLIC_KEY_SIZE + 4 + 32];
-    uint16_t signLen = 0;
-    memcpy(&signData[signLen], nodeIdentity.getPublicKey(), MC_PUBLIC_KEY_SIZE);
-    signLen += MC_PUBLIC_KEY_SIZE;
-    memcpy(&signData[signLen], &payload[32], 4);  // timestamp
-    signLen += 4;
-    memcpy(&signData[signLen], appdata, appdataLen);
-    signLen += appdataLen;
-
-    // [36-99] Signature
-    nodeIdentity.sign(&payload[pos], signData, signLen);
-    pos += MC_SIGNATURE_SIZE;
-
-    // [100+] Appdata (just name, no flags)
-    memcpy(&payload[pos], appdata, appdataLen);
-    pos += appdataLen;
-
-    pkt.payloadLen = pos;
-
-    LOG(TAG_ADVERT " ADV noflg %s t=%lu l=%d\n\r",
-        name, timestamp, pkt.payloadLen);
-
-    uint32_t id = getPacketId(&pkt);
-    packetCache.addIfNew(id);
-
-    if (transmitPacket(&pkt)) {
-        LOG(TAG_ADVERT " TX ok\n\r");
-        advTxCount++;
-    } else {
-        LOG(TAG_ADVERT " TX fail\n\r");
-    }
-
-    startReceive();
-}
-
 void sendAdvert(bool flood) {
     if (!nodeIdentity.isInitialized()) {
         LOG(TAG_ERROR " No ID\n\r");
@@ -1515,7 +1412,7 @@ bool sendDailyReport() {
     }
 
     // Generate report content
-    char reportText[128];
+    char reportText[96];
     uint16_t textLen = generateReportContent(reportText, sizeof(reportText) - 1);
     if (textLen == 0) {
         LOG(TAG_ERROR " Rpt gen fail\n\r");
@@ -1523,18 +1420,18 @@ bool sendDailyReport() {
     }
 
     // Build plaintext: [timestamp:4][txt_type|attempt:1][message]
-    uint8_t plaintext[140];
+    uint8_t plaintext[104];
     uint32_t timestamp = timeSync.getTimestamp();
     plaintext[0] = timestamp & 0xFF;
     plaintext[1] = (timestamp >> 8) & 0xFF;
     plaintext[2] = (timestamp >> 16) & 0xFF;
     plaintext[3] = (timestamp >> 24) & 0xFF;
-    plaintext[4] = (TXT_TYPE_PLAIN << 2) | 0;  // txt_type in upper 6 bits, attempt=0 in lower 2
+    plaintext[4] = (TXT_TYPE_PLAIN << 2) | 0;
     memcpy(&plaintext[5], reportText, textLen);
     uint16_t plaintextLen = 5 + textLen;
 
     // Encrypt: output is [MAC:2][ciphertext]
-    uint8_t encrypted[160];
+    uint8_t encrypted[120];
     uint16_t encLen = meshCrypto.encryptThenMAC(encrypted, plaintext, plaintextLen,
                                                  sharedSecret, sharedSecret);
     if (encLen == 0) {
@@ -1639,7 +1536,7 @@ bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int
     if (!timeSync.isSynchronized()) return false;
 
     // Build alert message
-    char message[64];
+    char message[48];
     const char* typeStr = nodeType == 1 ? "CHAT" : nodeType == 2 ? "RPT" : "NODE";
     snprintf(message, sizeof(message), "NEW %s: %s [%02X] %ddBm",
              typeStr, nodeName[0] ? nodeName : "?", nodeHash, rssi);
@@ -1651,7 +1548,7 @@ bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int
     }
 
     // Encrypt the message
-    uint8_t plaintext[64];
+    uint8_t plaintext[56];
     uint8_t plaintextLen = 0;
 
     // Format: [timestamp:4][text_type:1][message]
@@ -1660,14 +1557,14 @@ bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int
     plaintext[plaintextLen++] = (timestamp >> 8) & 0xFF;
     plaintext[plaintextLen++] = (timestamp >> 16) & 0xFF;
     plaintext[plaintextLen++] = (timestamp >> 24) & 0xFF;
-    plaintext[plaintextLen++] = (TXT_TYPE_PLAIN << 2) | 0;  // txt_type in upper 6 bits, attempt=0
+    plaintext[plaintextLen++] = (TXT_TYPE_PLAIN << 2) | 0;
 
     uint8_t msgLen = strlen(message);
     memcpy(&plaintext[plaintextLen], message, msgLen);
     plaintextLen += msgLen;
 
     // Encrypt
-    uint8_t encrypted[80];
+    uint8_t encrypted[72];
     uint16_t encLen = meshCrypto.encryptResponse(encrypted, plaintext, plaintextLen, sharedSecret);
     if (encLen == 0) return false;
 
@@ -1956,7 +1853,7 @@ bool processTxtMsgCLI(MCPacket* pkt) {
     }
 
     // Extract command string (starts at byte 5)
-    char cmdStr[64];
+    char cmdStr[48];
     uint16_t cmdLen = decryptedLen - 5;
     if (cmdLen > sizeof(cmdStr) - 1) cmdLen = sizeof(cmdStr) - 1;
     memcpy(cmdStr, &decrypted[5], cmdLen);
@@ -2185,7 +2082,7 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
                 return false;
             }
             {
-                char cmdStr[64];
+                char cmdStr[48];
                 uint16_t cmdLen = decryptedLen - 5;
                 if (cmdLen > sizeof(cmdStr) - 1) cmdLen = sizeof(cmdStr) - 1;
                 memcpy(cmdStr, &decrypted[5], cmdLen);

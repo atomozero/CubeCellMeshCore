@@ -1,9 +1,9 @@
 # CubeCellMeshCore Memory Optimization Guide
 
 ## Current Status (After Optimizations)
-- **Flash**: 129,388 / 131,072 bytes (98.7%)
+- **Flash**: 128,444 / 131,072 bytes (98.0%)
 - **RAM**: 8,136 / 16,384 bytes (49.7%)
-- **Available**: ~1,684 bytes Flash
+- **Available**: ~2,628 bytes Flash
 - **Daily Report**: Enabled via `#define ENABLE_DAILY_REPORT`
 
 ## Implemented Optimizations
@@ -19,9 +19,13 @@
 | OPT-7 | RadioLib exclude unused modules/protocols | 776 bytes Flash, 280 bytes RAM | ✅ Done |
 | OPT-8 | ANSI box-drawing tables removed (single processCommand) | N/A (dead code) | ✅ Done |
 | OPT-9 | Daily report separated from LITE_MODE (`ENABLE_DAILY_REPORT`) | Independent flag | ✅ Done |
+| OPT-10 | `battdebug` command behind `ENABLE_BATTDEBUG` flag | 488 bytes Flash | ✅ Done |
+| OPT-11 | Dead code removal (`sendAdvertNoFlags`) | 48 bytes Flash | ✅ Done |
+| OPT-12 | Shortened strings in processRemoteCommand + alert commands | 288 bytes Flash | ✅ Done |
+| OPT-13 | Reduced stack buffers (reportText, plaintext, encrypted, cmdStr) | Stack only | ✅ Done |
 
-**Total Implemented: 2,800 bytes Flash + 296 bytes RAM saved**
-**Daily report enabled, adding ~1,912 bytes Flash (net from 127,476 baseline)**
+**Total Flash saved vs baseline: ~2,800 bytes (before daily report)**
+**Net with daily report enabled: 128,444 bytes (98.0%) — 2,628 bytes free**
 
 ---
 
@@ -207,8 +211,9 @@ const char STR_SAVED[] PROGMEM = "Saved to EEPROM";
 - **Baseline**: Flash 127,476 bytes (97.3%), RAM 8,408 bytes (51.3%)
 - **After RadioLib exclusion**: Flash 126,700 bytes (96.7%), RAM 8,128 bytes (49.6%)
 - **After ANSI removal + new commands**: Flash 127,804 bytes (97.5%)
-- **After daily report enabled**: Flash 129,388 bytes (98.7%), RAM 8,136 bytes (49.7%)
-- **Available**: ~1,684 bytes Flash
+- **After daily report enabled**: Flash 129,388 bytes (98.7%)
+- **After moderate optimizations**: Flash 128,444 bytes (98.0%), RAM 8,136 bytes (49.7%)
+- **Available**: ~2,628 bytes Flash
 
 ---
 
