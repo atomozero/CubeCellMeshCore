@@ -85,7 +85,18 @@ void processCommand(char* cmd) {
         LOG_RAW("Nodes:%d\n\r", seenNodes.getCount());
         for (uint8_t i = 0; i < seenNodes.getCount(); i++) {
             const SeenNode* n = seenNodes.getNode(i);
-            if (n) LOG_RAW(" %02X %s %ddBm\n\r", n->hash, n->name[0]?n->name:"-", n->lastRssi);
+            if (n) {
+                uint32_t ago = (millis() - n->lastSeen) / 1000;
+                if (timeSync.isSynchronized()) {
+                    uint32_t ts = timeSync.getTimestamp() - ago;
+                    uint32_t h = (ts % 86400) / 3600;
+                    uint32_t m = (ts % 3600) / 60;
+                    uint32_t s = ts % 60;
+                    LOG_RAW(" %02X %s %ddBm %02lu:%02lu:%02lu\n\r", n->hash, n->name[0]?n->name:"-", n->lastRssi, h, m, s);
+                } else {
+                    LOG_RAW(" %02X %s %ddBm %lus ago\n\r", n->hash, n->name[0]?n->name:"-", n->lastRssi, ago);
+                }
+            }
         }
     }
     else if (strcmp(cmd, "newid") == 0) {
@@ -329,6 +340,31 @@ void processCommand(char* cmd) {
         LOG_RAW("Temp: %dC  Uptime: %lus\n\r", t->temperature, t->uptime);
         LOG_RAW("RX:%lu TX:%lu FWD:%lu ERR:%lu\n\r",
             t->rxCount, t->txCount, t->fwdCount, t->errorCount);
+    }
+    else if (strcmp(cmd, "battdebug") == 0) {
+        #ifdef CUBECELL
+        extern volatile int16 ADC_SAR_Seq_offset[];
+        extern volatile int32 ADC_SAR_Seq_countsPer10Volt[];
+        pinMode(VBAT_ADC_CTL, OUTPUT);
+        digitalWrite(VBAT_ADC_CTL, LOW);
+        delay(100);
+        uint16_t r = analogRead(ADC);
+        pinMode(VBAT_ADC_CTL, INPUT);
+        LOG_RAW("ADC raw=%u\n\r", r);
+        LOG_RAW("ch0 off=%d gain=%ld\n\r", ADC_SAR_Seq_offset[0], (long)ADC_SAR_Seq_countsPer10Volt[0]);
+        LOG_RAW("ch3 off=%d gain=%ld\n\r", ADC_SAR_Seq_offset[3], (long)ADC_SAR_Seq_countsPer10Volt[3]);
+        int32_t g0 = ADC_SAR_Seq_countsPer10Volt[0];
+        if (g0 != 0) {
+            float mv = ((float)((int32_t)r - ADC_SAR_Seq_offset[0]) * 10000.0f) / (float)g0;
+            LOG_RAW("ch0 cal: pin=%.0fmV batt=%.0fmV\n\r", mv, mv * 2.0f);
+        }
+        uint16_t rawMv = (uint32_t)r * 2400 * 2 / 4095;
+        LOG_RAW("Raw no cal: batt=%umV\n\r", rawMv);
+        telemetry.update();
+        LOG_RAW("Telemetry: %dmV (%d%%)\n\r", telemetry.getBatteryMv(), telemetry.getBatteryPercent());
+        #else
+        LOG_RAW("Not CubeCell\n\r");
+        #endif
     }
     else if (strcmp(cmd, "alert") == 0) {
         bool keySet = false;
@@ -903,21 +939,47 @@ void processCommand(char* cmd) {
         LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " RSSI/SNR    " ANSI_GREEN "%-16s" ANSI_RESET ANSI_CYAN "│\n\r", rssiStr);
         LOG_RAW(ANSI_CYAN "└────────────────────────────────┘" ANSI_RESET "\n\r");
     }
+    else if (strcmp(cmd, "battdebug") == 0) {
+        #ifdef CUBECELL
+        extern volatile int16 ADC_SAR_Seq_offset[];
+        extern volatile int32 ADC_SAR_Seq_countsPer10Volt[];
+        pinMode(VBAT_ADC_CTL, OUTPUT);
+        digitalWrite(VBAT_ADC_CTL, LOW);
+        delay(100);
+        uint16_t r = analogRead(ADC);
+        pinMode(VBAT_ADC_CTL, INPUT);
+        int32_t g0 = ADC_SAR_Seq_countsPer10Volt[0];
+        LOG_RAW("ADC raw=%u\n\r", r);
+        LOG_RAW("ch0 off=%d gain=%ld\n\r", ADC_SAR_Seq_offset[0], (long)g0);
+        // A: with offset subtraction (current code)
+        float mvA = ((float)((int32_t)r - ADC_SAR_Seq_offset[0]) * 10000.0f) / (float)g0;
+        LOG_RAW("A (r-off)*10k/g: pin=%.0f batt=%.0fmV\n\r", mvA, mvA * 2.0f);
+        // B: without offset (analogRead may already apply it)
+        float mvB = ((float)r * 10000.0f) / (float)g0;
+        LOG_RAW("B (r*10k/g):     pin=%.0f batt=%.0fmV\n\r", mvB, mvB * 2.0f);
+        // C: simple linear 0-2400mV over 0-4095
+        uint16_t mvC = (uint32_t)r * 2400 / 4095;
+        LOG_RAW("C (r*2400/4095): pin=%u batt=%umV\n\r", mvC, mvC * 2);
+        telemetry.update();
+        LOG_RAW("Telemetry: %dmV (%d%%)\n\r", telemetry.getBatteryMv(), telemetry.getBatteryPercent());
+        #else
+        LOG_RAW("Not CubeCell\n\r");
+        #endif
+    }
     else if (strcmp(cmd, "nodes") == 0) {
         LOG_RAW("\n\r");
-        LOG_RAW(ANSI_CYAN "┌────────────────────────────────────────────────────────┐\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE " SEEN NODES: %-2d                                        " ANSI_RESET ANSI_CYAN "│\n\r", seenNodes.getCount());
-        LOG_RAW(ANSI_CYAN "├──────┬────────────┬─────────┬─────────┬──────┬────────┤\n\r");
-        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Hash " ANSI_CYAN "│" ANSI_WHITE "   Name     " ANSI_CYAN "│" ANSI_WHITE "  RSSI   " ANSI_CYAN "│" ANSI_WHITE "   SNR   " ANSI_CYAN "│" ANSI_WHITE " Pkts " ANSI_CYAN "│" ANSI_WHITE "   Ago  " ANSI_CYAN "│\n\r");
-        LOG_RAW(ANSI_CYAN "├──────┼────────────┼─────────┼─────────┼──────┼────────┤" ANSI_RESET "\n\r");
+        LOG_RAW(ANSI_CYAN "┌──────────────────────────────────────────────────────────────────────┐\n\r");
+        LOG_RAW(ANSI_CYAN "│" ANSI_BOLD ANSI_WHITE " SEEN NODES: %-2d                                                    " ANSI_RESET ANSI_CYAN "│\n\r", seenNodes.getCount());
+        LOG_RAW(ANSI_CYAN "├──────┬────────────┬─────────┬─────────┬──────┬────────┬────────────┤\n\r");
+        LOG_RAW(ANSI_CYAN "│" ANSI_WHITE " Hash " ANSI_CYAN "│" ANSI_WHITE "   Name     " ANSI_CYAN "│" ANSI_WHITE "  RSSI   " ANSI_CYAN "│" ANSI_WHITE "   SNR   " ANSI_CYAN "│" ANSI_WHITE " Pkts " ANSI_CYAN "│" ANSI_WHITE "   Ago  " ANSI_CYAN "│" ANSI_WHITE "  LastSeen  " ANSI_CYAN "│\n\r");
+        LOG_RAW(ANSI_CYAN "├──────┼────────────┼─────────┼─────────┼──────┼────────┼────────────┤" ANSI_RESET "\n\r");
         if (seenNodes.getCount() == 0) {
-            LOG_RAW(ANSI_CYAN "│" ANSI_DIM "              No nodes detected yet                    " ANSI_RESET ANSI_CYAN "│\n\r");
+            LOG_RAW(ANSI_CYAN "│" ANSI_DIM "                    No nodes detected yet                            " ANSI_RESET ANSI_CYAN "│\n\r");
         } else {
             for (uint8_t i = 0; i < seenNodes.getCount(); i++) {
                 const SeenNode* n = seenNodes.getNode(i);
                 if (n) {
                     uint32_t ago = (millis() - n->lastSeen) / 1000;
-                    // Display name if available, otherwise show hash-based ID
                     char nameStr[12];
                     if (n->name[0] != '\0') {
                         strncpy(nameStr, n->name, sizeof(nameStr) - 1);
@@ -925,14 +987,24 @@ void processCommand(char* cmd) {
                     } else {
                         snprintf(nameStr, sizeof(nameStr), "Node-%02X", n->hash);
                     }
-                    LOG_RAW(ANSI_CYAN "│" ANSI_YELLOW "  %02X  " ANSI_RESET ANSI_CYAN "│" ANSI_GREEN " %-10s " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %4ddBm " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %2d.%02ddB " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %4d " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %5lus " ANSI_RESET ANSI_CYAN "│\n\r",
+                    char timeStr[12];
+                    if (timeSync.isSynchronized()) {
+                        uint32_t ts = timeSync.getTimestamp() - ago;
+                        uint32_t h = (ts % 86400) / 3600;
+                        uint32_t m = (ts % 3600) / 60;
+                        uint32_t s = ts % 60;
+                        snprintf(timeStr, sizeof(timeStr), " %02lu:%02lu:%02lu ", h, m, s);
+                    } else {
+                        snprintf(timeStr, sizeof(timeStr), "  no sync  ");
+                    }
+                    LOG_RAW(ANSI_CYAN "│" ANSI_YELLOW "  %02X  " ANSI_RESET ANSI_CYAN "│" ANSI_GREEN " %-10s " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %4ddBm " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %2d.%02ddB " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %4d " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %5lus " ANSI_RESET ANSI_CYAN "│" ANSI_WHITE " %s" ANSI_RESET ANSI_CYAN "│\n\r",
                         n->hash, nameStr, n->lastRssi,
                         n->lastSnr / 4, abs(n->lastSnr % 4) * 25,
-                        n->pktCount, ago);
+                        n->pktCount, ago, timeStr);
                 }
             }
         }
-        LOG_RAW(ANSI_CYAN "└──────┴────────────┴─────────┴─────────┴──────┴────────┘" ANSI_RESET "\n\r");
+        LOG_RAW(ANSI_CYAN "└──────┴────────────┴─────────┴─────────┴──────┴────────┴────────────┘" ANSI_RESET "\n\r");
     }
     // ==================== REPEATER COMMANDS ====================
     else if (strcmp(cmd, "neighbours") == 0 || strcmp(cmd, "neighbors") == 0) {
@@ -1311,10 +1383,19 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     else if (strcmp(cmd, "nodes") == 0) {
         uint8_t count = seenNodes.getCount();
         RESP_APPEND("Nodes:%d\n", count);
-        for (uint8_t i = 0; i < count && len < maxLen - 32; i++) {
+        for (uint8_t i = 0; i < count && len < maxLen - 48; i++) {
             const SeenNode* n = seenNodes.getNode(i);
             if (n && n->lastSeen > 0) {
-                RESP_APPEND("%02X %ddBm %d.%ddB\n", n->hash, n->lastRssi, n->lastSnr/4, abs(n->lastSnr%4)*25);
+                uint32_t ago = (millis() - n->lastSeen) / 1000;
+                if (timeSync.isSynchronized()) {
+                    uint32_t ts = timeSync.getTimestamp() - ago;
+                    uint32_t h = (ts % 86400) / 3600;
+                    uint32_t m = (ts % 3600) / 60;
+                    uint32_t s = ts % 60;
+                    RESP_APPEND("%02X %s %ddBm %d.%ddB @%02lu:%02lu:%02lu\n", n->hash, n->name[0]?n->name:"-", n->lastRssi, n->lastSnr/4, abs(n->lastSnr%4)*25, h, m, s);
+                } else {
+                    RESP_APPEND("%02X %s %ddBm %d.%ddB %lus\n", n->hash, n->name[0]?n->name:"-", n->lastRssi, n->lastSnr/4, abs(n->lastSnr%4)*25, ago);
+                }
             }
         }
     }
