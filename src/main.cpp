@@ -1388,40 +1388,21 @@ uint16_t generateNodesReport(char* buf, uint16_t maxLen) {
 }
 
 /**
- * Send report message as encrypted text to admin
- * Uses FLOOD routing since we don't know the path to admin
- *
- * Packet format (MC_PAYLOAD_PLAIN):
- * [dest_hash:1][src_hash:1][MAC:2][encrypted_payload]
- *
- * Encrypted payload format:
- * [timestamp:4][txt_type|attempt:1][message:variable]
- *
- * @return true if report queued for transmission
+ * Send encrypted text message to a destination public key
+ * Used by daily report and node alerts
  */
-bool sendReportMessage(const char* text, uint16_t textLen) {
+bool sendEncryptedToAdmin(const uint8_t* destPubKey, const char* text, uint16_t textLen) {
     // Check if destination key is set
     bool keySet = false;
     for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
-        if (reportDestPubKey[i] != 0) { keySet = true; break; }
+        if (destPubKey[i] != 0) { keySet = true; break; }
     }
-    if (!keySet) {
-        LOG(TAG_INFO " Report: no dest\n\r");
-        return false;
-    }
+    if (!keySet || !timeSync.isSynchronized()) return false;
 
-    // Check time sync
-    if (!timeSync.isSynchronized()) {
-        LOG(TAG_INFO " Report: no sync\n\r");
-        return false;
-    }
-
-    // Calculate shared secret with destination
+    // Calculate shared secret
     uint8_t sharedSecret[MC_SHARED_SECRET_SIZE];
-    if (!MeshCrypto::calcSharedSecret(sharedSecret, nodeIdentity.getPrivateKey(), reportDestPubKey)) {
-        LOG(TAG_ERROR " Rpt ECDH fail\n\r");
+    if (!MeshCrypto::calcSharedSecret(sharedSecret, nodeIdentity.getPrivateKey(), destPubKey))
         return false;
-    }
 
     // Build plaintext: [timestamp:4][txt_type|attempt:1][message]
     uint8_t plaintext[104];
@@ -1434,49 +1415,35 @@ bool sendReportMessage(const char* text, uint16_t textLen) {
     memcpy(&plaintext[5], text, textLen);
     uint16_t plaintextLen = 5 + textLen;
 
-    // Encrypt: output is [MAC:2][ciphertext]
+    // Encrypt
     uint8_t encrypted[120];
     uint16_t encLen = meshCrypto.encryptThenMAC(encrypted, plaintext, plaintextLen,
                                                  sharedSecret, sharedSecret);
-    if (encLen == 0) {
-        LOG(TAG_ERROR " Rpt encrypt fail\n\r");
-        memset(sharedSecret, 0, sizeof(sharedSecret));
-        return false;
-    }
+    memset(sharedSecret, 0, sizeof(sharedSecret));
+    memset(plaintext, 0, sizeof(plaintext));
+    if (encLen == 0) return false;
 
     // Build packet
     MCPacket pkt;
     pkt.clear();
-
-    // Use FLOOD routing (we don't know the path to admin)
     pkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1);
-
-    // Path starts empty (will be built by repeaters)
     pkt.pathLen = 0;
-
-    // Payload: [dest_hash:1][src_hash:1][encrypted_data]
-    pkt.payload[0] = reportDestPubKey[0];  // Destination hash
-    pkt.payload[1] = nodeIdentity.getNodeHash();  // Source hash
+    pkt.payload[0] = destPubKey[0];
+    pkt.payload[1] = nodeIdentity.getNodeHash();
     memcpy(&pkt.payload[2], encrypted, encLen);
     pkt.payloadLen = 2 + encLen;
 
-    // Clear sensitive data
-    memset(sharedSecret, 0, sizeof(sharedSecret));
-    memset(plaintext, 0, sizeof(plaintext));
+    LOG(TAG_INFO " Msg to %02X %dB\n\r", destPubKey[0], pkt.payloadLen);
 
-    // Log
-    LOG(TAG_INFO " Rpt to %02X %dB\n\r",
-        reportDestPubKey[0], pkt.payloadLen);
-
-    // Add to packet cache so we don't re-forward our own message
     uint32_t id = getPacketId(&pkt);
     packetCache.addIfNew(id);
-
-    // Queue for transmission
     txQueue.add(&pkt);
     txCount++;
-
     return true;
+}
+
+bool sendReportMessage(const char* text, uint16_t textLen) {
+    return sendEncryptedToAdmin(reportDestPubKey, text, textLen);
 }
 
 /**
@@ -1544,73 +1511,14 @@ void checkDailyReport() {
  * @return true if alert sent
  */
 bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int16_t rssi) {
-    // Check if alert is enabled
     if (!alertEnabled) return false;
 
-    // Check if we have a destination
-    bool keySet = false;
-    for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
-        if (alertDestPubKey[i] != 0) { keySet = true; break; }
-    }
-    if (!keySet) return false;
-
-    // Check if time is synced
-    if (!timeSync.isSynchronized()) return false;
-
-    // Build alert message
     char message[48];
     const char* typeStr = nodeType == 1 ? "CHAT" : nodeType == 2 ? "RPT" : "NODE";
     snprintf(message, sizeof(message), "NEW %s: %s [%02X] %ddBm",
              typeStr, nodeName[0] ? nodeName : "?", nodeHash, rssi);
 
-    // Calculate shared secret with destination
-    uint8_t sharedSecret[32];
-    if (!MeshCrypto::calcSharedSecret(sharedSecret, nodeIdentity.getPrivateKey(), alertDestPubKey)) {
-        return false;
-    }
-
-    // Encrypt the message
-    uint8_t plaintext[56];
-    uint8_t plaintextLen = 0;
-
-    // Format: [timestamp:4][text_type:1][message]
-    uint32_t timestamp = timeSync.getTimestamp();
-    plaintext[plaintextLen++] = timestamp & 0xFF;
-    plaintext[plaintextLen++] = (timestamp >> 8) & 0xFF;
-    plaintext[plaintextLen++] = (timestamp >> 16) & 0xFF;
-    plaintext[plaintextLen++] = (timestamp >> 24) & 0xFF;
-    plaintext[plaintextLen++] = (TXT_TYPE_PLAIN << 2) | 0;
-
-    uint8_t msgLen = strlen(message);
-    memcpy(&plaintext[plaintextLen], message, msgLen);
-    plaintextLen += msgLen;
-
-    // Encrypt
-    uint8_t encrypted[72];
-    uint16_t encLen = meshCrypto.encryptResponse(encrypted, plaintext, plaintextLen, sharedSecret);
-    if (encLen == 0) return false;
-
-    // Build packet
-    MCPacket pkt;
-    pkt.clear();
-    pkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1);
-    pkt.pathLen = 0;
-
-    // Payload: [dest_hash:1][src_hash:1][encrypted]
-    pkt.payload[0] = alertDestPubKey[0];  // Destination hash
-    pkt.payload[1] = nodeIdentity.getNodeHash();  // Source hash
-    memcpy(&pkt.payload[2], encrypted, encLen);
-    pkt.payloadLen = 2 + encLen;
-
-    LOG(TAG_INFO " Alert to %02X\n\r", alertDestPubKey[0]);
-
-    // Add to cache and queue
-    uint32_t id = getPacketId(&pkt);
-    packetCache.addIfNew(id);
-    txQueue.add(&pkt);
-    txCount++;
-
-    return true;
+    return sendEncryptedToAdmin(alertDestPubKey, message, strlen(message));
 }
 
 void checkAdvertBeacon() {
