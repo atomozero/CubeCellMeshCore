@@ -243,6 +243,11 @@ void processCommand(char* cmd) {
     else if (strcmp(cmd, "name") == 0) {
         LOG_RAW("Name: %s\n\r", nodeIdentity.getNodeName());
     }
+    else if (strcmp(cmd, "location clear") == 0) {
+        nodeIdentity.clearLocation();
+        nodeIdentity.save();
+        LOG_RAW("Location cleared\n\r");
+    }
     else if (strncmp(cmd, "location ", 9) == 0) {
         char* args = (char*)(cmd + 9);
         char* space = strchr(args, ' ');
@@ -268,11 +273,6 @@ void processCommand(char* cmd) {
         } else {
             LOG_RAW("Location: not set\n\r");
         }
-    }
-    else if (strcmp(cmd, "location clear") == 0) {
-        nodeIdentity.clearLocation();
-        nodeIdentity.save();
-        LOG_RAW("Location cleared\n\r");
     }
     else if (strcmp(cmd, "identity") == 0) {
         LOG_RAW("Name: %s  Hash: %02X  Type: %d\n\r",
