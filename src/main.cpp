@@ -1375,8 +1375,20 @@ uint16_t generateReportContent(char* buf, uint16_t maxLen) {
     return len;
 }
 
+uint16_t generateNodesReport(char* buf, uint16_t maxLen) {
+    uint8_t cnt = seenNodes.getCount();
+    int n = snprintf(buf, maxLen, "Nodes(%d):", cnt);
+    for (uint8_t i = 0; i < cnt && n < (int)maxLen - 1; i++) {
+        const SeenNode* nd = seenNodes.getNode(i);
+        if (nd) {
+            n += snprintf(buf + n, maxLen - n, "\n%s[%d]", nd->name, nd->lastRssi);
+        }
+    }
+    return (n > 0 && n < (int)maxLen) ? n : 0;
+}
+
 /**
- * Send daily report as encrypted text message to admin
+ * Send report message as encrypted text to admin
  * Uses FLOOD routing since we don't know the path to admin
  *
  * Packet format (MC_PAYLOAD_PLAIN):
@@ -1387,7 +1399,7 @@ uint16_t generateReportContent(char* buf, uint16_t maxLen) {
  *
  * @return true if report queued for transmission
  */
-bool sendDailyReport() {
+bool sendReportMessage(const char* text, uint16_t textLen) {
     // Check if destination key is set
     bool keySet = false;
     for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
@@ -1411,14 +1423,6 @@ bool sendDailyReport() {
         return false;
     }
 
-    // Generate report content
-    char reportText[96];
-    uint16_t textLen = generateReportContent(reportText, sizeof(reportText) - 1);
-    if (textLen == 0) {
-        LOG(TAG_ERROR " Rpt gen fail\n\r");
-        return false;
-    }
-
     // Build plaintext: [timestamp:4][txt_type|attempt:1][message]
     uint8_t plaintext[104];
     uint32_t timestamp = timeSync.getTimestamp();
@@ -1427,7 +1431,7 @@ bool sendDailyReport() {
     plaintext[2] = (timestamp >> 16) & 0xFF;
     plaintext[3] = (timestamp >> 24) & 0xFF;
     plaintext[4] = (TXT_TYPE_PLAIN << 2) | 0;
-    memcpy(&plaintext[5], reportText, textLen);
+    memcpy(&plaintext[5], text, textLen);
     uint16_t plaintextLen = 5 + textLen;
 
     // Encrypt: output is [MAC:2][ciphertext]
@@ -1472,6 +1476,24 @@ bool sendDailyReport() {
     txQueue.add(&pkt);
     txCount++;
 
+    return true;
+}
+
+/**
+ * Send daily report (stats + nodes list)
+ */
+bool sendDailyReport() {
+    char reportText[96];
+    uint16_t textLen = generateReportContent(reportText, sizeof(reportText) - 1);
+    if (textLen == 0) return false;
+
+    if (!sendReportMessage(reportText, textLen)) return false;
+
+    // Send nodes report
+    uint16_t nodesLen = generateNodesReport(reportText, sizeof(reportText) - 1);
+    if (nodesLen > 0) {
+        sendReportMessage(reportText, nodesLen);
+    }
     return true;
 }
 
