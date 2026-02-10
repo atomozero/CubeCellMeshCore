@@ -1356,12 +1356,12 @@ void sendDirectMessage(const char* recipientName, const char* message) {
 uint16_t generateReportContent(char* buf, uint16_t maxLen) {
     uint16_t len = 0;
 
-    // Format: "NodeName: Daily Report\nUptime: XXh\nRX:X TX:X FWD:X ERR:X\nBatt: XmV"
+    // Format: "NodeName: Report\nUp:XXh\nRX:X TX:X FWD:X ERR:X\nBat:XmV"
     int n = snprintf(buf, maxLen,
-        "%s: Daily Report\n"
-        "Uptime: %luh\n"
+        "%s: Report\n"
+        "Up:%luh\n"
         "RX:%lu TX:%lu FWD:%lu ERR:%lu\n"
-        "Batt: %dmV",
+        "Bat:%dmV",
         nodeIdentity.getNodeName(),
         millis() / 3600000,  // Hours
         rxCount, txCount, fwdCount, errCount,
