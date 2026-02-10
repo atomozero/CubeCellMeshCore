@@ -1,4 +1,4 @@
-# CubeCellMeshCore v0.3.3 - Installation Guide
+# CubeCellMeshCore v0.4.0 - Installation Guide
 
 ## Requirements
 
@@ -70,8 +70,8 @@ Connect at **115200 baud** to access the serial console.
 |---------|-------------|
 | `name <name>` | Set node name (max 15 chars) |
 | `location <lat> <lon>` | Set GPS coordinates |
-| `adminpw <password>` | Set admin password |
-| `guestpw <password>` | Set guest password |
+| `passwd admin <pwd>` | Set admin password |
+| `passwd guest <pwd>` | Set guest password |
 | `save` | Save config to EEPROM |
 | `reboot` | Restart device |
 
