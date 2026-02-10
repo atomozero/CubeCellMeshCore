@@ -1513,7 +1513,7 @@ void checkDailyReport() {
 bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int16_t rssi) {
     if (!alertEnabled) return false;
 
-    char message[48];
+    char message[40];
     const char* typeStr = nodeType == 1 ? "CHAT" : nodeType == 2 ? "RPT" : "NODE";
     snprintf(message, sizeof(message), "NEW %s: %s [%02X] %ddBm",
              typeStr, nodeName[0] ? nodeName : "?", nodeHash, rssi);
@@ -1782,7 +1782,7 @@ bool processTxtMsgCLI(MCPacket* pkt) {
     }
 
     // Extract command string (starts at byte 5)
-    char cmdStr[48];
+    char cmdStr[40];
     uint16_t cmdLen = decryptedLen - 5;
     if (cmdLen > sizeof(cmdStr) - 1) cmdLen = sizeof(cmdStr) - 1;
     memcpy(cmdStr, &decrypted[5], cmdLen);
@@ -2011,7 +2011,7 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
                 return false;
             }
             {
-                char cmdStr[48];
+                char cmdStr[40];
                 uint16_t cmdLen = decryptedLen - 5;
                 if (cmdLen > sizeof(cmdStr) - 1) cmdLen = sizeof(cmdStr) - 1;
                 memcpy(cmdStr, &decrypted[5], cmdLen);
