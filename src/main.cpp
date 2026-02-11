@@ -660,7 +660,7 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     // Helper macro to append to response
     #define RESP_APPEND(...) do { \
         int _rc = snprintf(response + len, maxLen - len, __VA_ARGS__); \
-        if (_rc > 0) len += _rc; \
+        if (_rc > 0 && len + _rc < maxLen) len += _rc; \
     } while(0)
 
     // === Read-only commands (guest + admin) ===
@@ -874,12 +874,8 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     }
 #endif
     else if (strcmp(cmd, "help") == 0) {
-        RESP_APPEND("status stats lifetime radiostats packetstats telemetry nodes neighbours identity\n"
-                    "set repeat/password/guest/flood.max name location advert save reset reboot"
-#ifdef ENABLE_DAILY_REPORT
-                    " report"
-#endif
-                    "\n");
+        RESP_APPEND("status stats time telemetry nodes neighbours identity lifetime\n"
+                    "set name location advert report save reset reboot\n");
     }
     else {
         RESP_APPEND("E:?\n");
