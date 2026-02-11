@@ -843,9 +843,18 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
         for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
             if (reportDestPubKey[i] != 0) { keySet = true; break; }
         }
-        RESP_APPEND("Rpt:%s %02d:%02d D:%s\n",
+        RESP_APPEND("Rpt:%s %02d:%02d D:%02X%s\n",
             reportEnabled ? "ON" : "OFF", reportHour, reportMinute,
-            keySet ? "set" : "no");
+            reportDestPubKey[0], keySet ? "" : "(no)");
+    }
+    else if (strncmp(cmd, "report dest ", 12) == 0 && isAdmin) {
+        const char* arg = cmd + 12;
+        Contact* c = contactMgr.findByName(arg);
+        if (c) {
+            memcpy(reportDestPubKey, c->pubKey, REPORT_PUBKEY_SIZE);
+            saveConfig();
+            RESP_APPEND("Dest:%s(%02X)\n", c->name, reportDestPubKey[0]);
+        } else RESP_APPEND("E:not found\n");
     }
     else if (strcmp(cmd, "report on") == 0 && isAdmin) {
         bool keySet = false;
