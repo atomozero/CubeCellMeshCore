@@ -896,8 +896,9 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     }
 #endif
     else if (strcmp(cmd, "help") == 0) {
-        RESP_APPEND("status stats time telemetry nodes neighbours identity lifetime\n"
-                    "set name location advert report save reset reboot\n");
+        RESP_APPEND("status stats time nodes identity\n");
+        RESP_APPEND("telemetry location neighbours\n");
+        RESP_APPEND("set name advert save reboot");
     }
     else {
         RESP_APPEND("E:?\n");
