@@ -837,9 +837,49 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     else if (strcmp(cmd, "reboot") == 0) {
         RESP_APPEND("reboot\n");
     }
+#ifdef ENABLE_DAILY_REPORT
+    else if (strcmp(cmd, "report") == 0) {
+        bool keySet = false;
+        for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
+            if (reportDestPubKey[i] != 0) { keySet = true; break; }
+        }
+        RESP_APPEND("Rpt:%s %02d:%02d D:%s\n",
+            reportEnabled ? "ON" : "OFF", reportHour, reportMinute,
+            keySet ? "set" : "no");
+    }
+    else if (strcmp(cmd, "report on") == 0 && isAdmin) {
+        bool keySet = false;
+        for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
+            if (reportDestPubKey[i] != 0) { keySet = true; break; }
+        }
+        if (keySet) {
+            reportEnabled = true; saveConfig();
+            RESP_APPEND("Rpt ON %02d:%02d\n", reportHour, reportMinute);
+        } else RESP_APPEND("E:no dest\n");
+    }
+    else if (strcmp(cmd, "report off") == 0 && isAdmin) {
+        reportEnabled = false; saveConfig();
+        RESP_APPEND("Rpt OFF\n");
+    }
+    else if (strcmp(cmd, "report test") == 0 && isAdmin) {
+        extern bool sendDailyReport();
+        RESP_APPEND(sendDailyReport() ? "Rpt sent\n" : "E:rpt\n");
+    }
+    else if (strncmp(cmd, "report time ", 12) == 0 && isAdmin) {
+        int h, m;
+        if (sscanf(cmd + 12, "%d:%d", &h, &m) == 2 && h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+            reportHour = h; reportMinute = m; saveConfig();
+            RESP_APPEND("Rpt %02d:%02d\n", h, m);
+        } else RESP_APPEND("E:HH:MM\n");
+    }
+#endif
     else if (strcmp(cmd, "help") == 0) {
         RESP_APPEND("status stats lifetime radiostats packetstats telemetry nodes neighbours identity\n"
-                    "set repeat/password/guest/flood.max name location advert save reset reboot\n");
+                    "set repeat/password/guest/flood.max name location advert save reset reboot"
+#ifdef ENABLE_DAILY_REPORT
+                    " report"
+#endif
+                    "\n");
     }
     else {
         RESP_APPEND("E:?\n");
