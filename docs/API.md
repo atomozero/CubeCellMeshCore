@@ -204,6 +204,7 @@ Commands available via encrypted mesh messages:
 - `stats` - Packet statistics
 - `time` - Current time
 - `telemetry` - Sensor data
+- `radio` - Radio parameters (freq, BW, SF, CR)
 - `nodes` - Seen nodes count
 - `neighbours` - Neighbour list
 
@@ -214,6 +215,8 @@ Commands available via encrypted mesh messages:
 - `set flood.max <n>` - Max flood hops
 - `name <name>` - Change node name
 - `location <lat> <lon>` - Set location
+- `ping` - Send test packet
+- `rxboost [on|off]` - Show or toggle RX boost
 - `advert` - Trigger ADVERT
 - `advert interval <s>` - Set interval
 - `reboot` - Remote reboot

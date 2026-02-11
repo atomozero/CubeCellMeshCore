@@ -754,6 +754,10 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
         RESP_APPEND("FL RX:%lu TX:%lu DR RX:%lu TX:%lu\n",
             ps.numRecvFlood, ps.numSentFlood, ps.numRecvDirect, ps.numSentDirect);
     }
+    else if (strcmp(cmd, "radio") == 0) {
+        RESP_APPEND("%.3f BW%.1f SF%d CR%d\n",
+            (float)MC_FREQUENCY, (float)MC_BANDWIDTH, MC_SPREADING, MC_CODING_RATE);
+    }
     else if (strcmp(cmd, "lifetime") == 0) {
         const PersistentStats* ps = getPersistentStats();
         RESP_APPEND("Boots:%u RX:%lu TX:%lu FWD:%lu Nodes:%lu\n",
@@ -835,6 +839,23 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
         sendAdvert(false);
         RESP_APPEND("adv local\n");
     }
+    else if (strcmp(cmd, "ping") == 0) {
+        sendPing();
+        RESP_APPEND("ping sent\n");
+    }
+    else if (strcmp(cmd, "rxboost on") == 0) {
+        rxBoostEnabled = true;
+        applyPowerSettings(); saveConfig();
+        RESP_APPEND("RxB:ON\n");
+    }
+    else if (strcmp(cmd, "rxboost off") == 0) {
+        rxBoostEnabled = false;
+        applyPowerSettings(); saveConfig();
+        RESP_APPEND("RxB:OFF\n");
+    }
+    else if (strcmp(cmd, "rxboost") == 0) {
+        RESP_APPEND("RxB:%s\n", rxBoostEnabled ? "ON" : "OFF");
+    }
     else if (strcmp(cmd, "save") == 0) {
         saveConfig();
         RESP_APPEND("saved\n");
@@ -897,8 +918,8 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
 #endif
     else if (strcmp(cmd, "help") == 0) {
         RESP_APPEND("status stats time nodes identity\n");
-        RESP_APPEND("telemetry location neighbours\n");
-        RESP_APPEND("set name advert save reboot");
+        RESP_APPEND("telemetry radio location\n");
+        RESP_APPEND("ping rxboost advert save reboot");
     }
     else {
         RESP_APPEND("E:?\n");

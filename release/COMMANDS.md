@@ -96,13 +96,14 @@ Once authenticated via the MeshCore app, you can send CLI commands remotely.
 
 ### Guest-allowed commands (remote)
 - `status`, `stats`, `lifetime`, `telemetry`
-- `radiostats`, `packetstats`
+- `radiostats`, `packetstats`, `radio`
 - `nodes`, `contacts`, `neighbours`, `identity`
 - `time`, `advert interval`
 
 ### Admin-only commands (remote)
 - `name`, `location`, `passwd`, `nodetype`
 - `set repeat/password/guest/flood.max`
+- `ping`, `rxboost [on|off]`
 - `advert`, `save`, `reset`, `reboot`
 
 ## Radio Settings (EU868)
