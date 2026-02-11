@@ -880,8 +880,12 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
         RESP_APPEND("Rpt OFF\n");
     }
     else if (strcmp(cmd, "report test") == 0 && isAdmin) {
-        extern bool sendDailyReport();
-        RESP_APPEND(sendDailyReport() ? "Rpt sent\n" : "E:rpt\n");
+        extern uint16_t generateReportContent(char*, uint16_t);
+        len = generateReportContent(response, maxLen - 1);
+    }
+    else if (strcmp(cmd, "report nodes") == 0 && isAdmin) {
+        extern uint16_t generateNodesReport(char*, uint16_t);
+        len = generateNodesReport(response, maxLen - 1);
     }
     else if (strncmp(cmd, "report time ", 12) == 0 && isAdmin) {
         int h, m;
