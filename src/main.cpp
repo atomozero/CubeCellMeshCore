@@ -1445,9 +1445,11 @@ uint16_t generateNodesReport(char* buf, uint16_t maxLen) {
     return (n > 0 && n < (int)maxLen) ? n : 0;
 }
 
+#endif // ENABLE_DAILY_REPORT
+
 /**
  * Send encrypted text message to a destination public key
- * Used by daily report and node alerts
+ * Used by node alerts (and daily report if enabled)
  */
 bool sendEncryptedToAdmin(const uint8_t* destPubKey, const char* text, uint16_t textLen) {
     // Check if destination key is set
@@ -1500,6 +1502,7 @@ bool sendEncryptedToAdmin(const uint8_t* destPubKey, const char* text, uint16_t 
     return true;
 }
 
+#ifdef ENABLE_DAILY_REPORT
 bool sendReportMessage(const char* text, uint16_t textLen) {
     return sendEncryptedToAdmin(reportDestPubKey, text, textLen);
 }

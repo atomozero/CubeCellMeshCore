@@ -17,7 +17,7 @@
 //#define SILENT                  // Disable ALL serial output
 #define LITE_MODE                 // Remove non-essential features for space saving
 #define MINIMAL_DEBUG             // Minimal debug output (no fancy ANSI tables)
-#define ENABLE_DAILY_REPORT       // Enable daily report functionality
+//#define ENABLE_DAILY_REPORT       // Disabled - repeaters can't receive TXT replies
 //#define ANSI_COLORS             // Disabled to save ~500 bytes Flash
 
 // Node identity - set to 0 to auto-generate from chip ID
