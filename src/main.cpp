@@ -574,6 +574,15 @@ void processCommand(char* cmd) {
             LOG_RAW(sendDailyReport() ? "Report sent\n\r" : "Report fail\n\r");
         } else LOG_RAW("No dest key\n\r");
     }
+    else if (strncmp(cmd, "report dest ", 12) == 0) {
+        const char* arg = cmd + 12;
+        Contact* c = contactMgr.findByName(arg);
+        if (c) {
+            memcpy(reportDestPubKey, c->pubKey, REPORT_PUBKEY_SIZE);
+            saveConfig();
+            LOG_RAW("Dest:%s(%02X)\n\r", c->name, reportDestPubKey[0]);
+        } else LOG_RAW("'%s' not found\n\r", arg);
+    }
     else if (strncmp(cmd, "report time ", 12) == 0) {
         int h, m;
         if (sscanf(cmd + 12, "%d:%d", &h, &m) == 2 && h >= 0 && h <= 23 && m >= 0 && m <= 59) {
