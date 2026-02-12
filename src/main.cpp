@@ -88,10 +88,9 @@ void processCommand(char* cmd) {
                 uint32_t ago = (millis() - n->lastSeen) / 1000;
                 if (timeSync.isSynchronized()) {
                     uint32_t ts = timeSync.getTimestamp() - ago;
-                    uint32_t h = (ts % 86400) / 3600;
-                    uint32_t m = (ts % 3600) / 60;
-                    uint32_t s = ts % 60;
-                    LOG_RAW(" %02X %s %ddBm %02lu:%02lu:%02lu\n\r", n->hash, n->name[0]?n->name:"-", n->lastRssi, h, m, s);
+                    TimeSync::DateTime dt;
+                    TimeSync::timestampToDateTime(ts, dt);
+                    LOG_RAW(" %02X %s %ddBm %02d/%02d/%02d %02d:%02d:%02d\n\r", n->hash, n->name[0]?n->name:"-", n->lastRssi, dt.day, dt.month, dt.year % 100, dt.hour, dt.minute, dt.second);
                 } else {
                     LOG_RAW(" %02X %s %ddBm %lus ago\n\r", n->hash, n->name[0]?n->name:"-", n->lastRssi, ago);
                 }
@@ -703,10 +702,9 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
                 uint32_t ago = (millis() - n->lastSeen) / 1000;
                 if (timeSync.isSynchronized()) {
                     uint32_t ts = timeSync.getTimestamp() - ago;
-                    uint32_t h = (ts % 86400) / 3600;
-                    uint32_t m = (ts % 3600) / 60;
-                    uint32_t s = ts % 60;
-                    RESP_APPEND("%02X %s %ddBm %d.%ddB @%02lu:%02lu:%02lu\n", n->hash, n->name[0]?n->name:"-", n->lastRssi, n->lastSnr/4, abs(n->lastSnr%4)*25, h, m, s);
+                    TimeSync::DateTime dt;
+                    TimeSync::timestampToDateTime(ts, dt);
+                    RESP_APPEND("%02X %s %ddBm %d.%ddB %02d/%02d/%02d %02d:%02d\n", n->hash, n->name[0]?n->name:"-", n->lastRssi, n->lastSnr/4, abs(n->lastSnr%4)*25, dt.day, dt.month, dt.year % 100, dt.hour, dt.minute);
                 } else {
                     RESP_APPEND("%02X %s %ddBm %d.%ddB %lus\n", n->hash, n->name[0]?n->name:"-", n->lastRssi, n->lastSnr/4, abs(n->lastSnr%4)*25, ago);
                 }

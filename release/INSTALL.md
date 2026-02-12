@@ -61,7 +61,7 @@ Connect at **115200 baud** to access the serial console.
 | `status` | System status |
 | `stats` | Packet statistics |
 | `identity` | Show node public key |
-| `nodes` | List discovered nodes |
+| `nodes` | List discovered nodes with last seen date/time |
 | `telemetry` | Show telemetry data |
 
 ### Configuration Commands

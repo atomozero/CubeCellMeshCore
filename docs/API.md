@@ -152,7 +152,7 @@ class ContactManager {
 | `status` | System status overview |
 | `stats` | Packet statistics |
 | `advert` | Send ADVERT now |
-| `nodes` | List seen nodes |
+| `nodes` | List seen nodes with last seen date/time |
 | `contacts` | List known contacts |
 | `neighbours` | List mesh neighbours |
 | `telemetry` | Battery, temperature, uptime |

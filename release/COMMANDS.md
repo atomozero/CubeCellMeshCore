@@ -14,7 +14,7 @@ Serial console at 115200 baud.
 | `packetstats` | Packet breakdown: flood/direct RX/TX |
 | `telemetry` | Battery mV/%, temperature, uptime |
 | `identity` | Node name, hash, public key |
-| `nodes` | Discovered nodes (hash, name, RSSI) |
+| `nodes` | Discovered nodes (hash, name, RSSI, last seen date/time) |
 | `contacts` | Known contacts with public keys |
 | `neighbours` | Direct repeater neighbours (0-hop) |
 

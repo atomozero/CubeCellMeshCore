@@ -132,6 +132,33 @@ public:
     }
 
     /**
+     * Convert Unix timestamp to date/time components
+     */
+    struct DateTime {
+        uint8_t day, month, hour, minute, second;
+        uint16_t year;
+    };
+
+    static void timestampToDateTime(uint32_t ts, DateTime& dt) {
+        dt.second = ts % 60; ts /= 60;
+        dt.minute = ts % 60; ts /= 60;
+        dt.hour   = ts % 24; ts /= 24;
+        // ts is now days since 1970-01-01
+        // Algorithm from http://howardhinnant.github.io/date_algorithms.html
+        uint32_t z = ts + 719468;
+        uint32_t era = z / 146097;
+        uint32_t doe = z - era * 146097;
+        uint32_t yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365;
+        uint32_t y = yoe + era * 400;
+        uint32_t doy = doe - (365*yoe + yoe/4 - yoe/100);
+        uint32_t mp = (5*doy + 2) / 153;
+        dt.day = doy - (153*mp + 2)/5 + 1;
+        dt.month = mp + (mp < 10 ? 3 : -9);
+        if (dt.month <= 2) y++;
+        dt.year = y;
+    }
+
+    /**
      * Check if we have a pending timestamp waiting for confirmation
      */
     bool hasPendingSync() const {
