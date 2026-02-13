@@ -1,10 +1,11 @@
 # CubeCellMeshCore Memory Optimization Guide
 
 ## Current Status (After Optimizations)
-- **Flash**: 128,444 / 131,072 bytes (98.0%)
+- **Flash**: 128,068 / 131,072 bytes (97.7%)
 - **RAM**: 8,136 / 16,384 bytes (49.7%)
-- **Available**: ~2,628 bytes Flash
-- **Daily Report**: Enabled via `#define ENABLE_DAILY_REPORT`
+- **Available**: ~3,004 bytes Flash
+- **Daily Report**: Disabled via `#define ENABLE_DAILY_REPORT`
+- **Note**: RAM 49.7% is static only; ~4 KB free at runtime (incl. stack/heap)
 
 ## Implemented Optimizations
 
@@ -213,7 +214,8 @@ const char STR_SAVED[] PROGMEM = "Saved to EEPROM";
 - **After ANSI removal + new commands**: Flash 127,804 bytes (97.5%)
 - **After daily report enabled**: Flash 129,388 bytes (98.7%)
 - **After moderate optimizations**: Flash 128,444 bytes (98.0%), RAM 8,136 bytes (49.7%)
-- **Available**: ~2,628 bytes Flash
+- **After daily report disabled + directed ping**: Flash 128,068 bytes (97.7%)
+- **Available**: ~3,004 bytes Flash
 
 ---
 

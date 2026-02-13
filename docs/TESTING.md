@@ -98,6 +98,22 @@ Expected: List of direct neighbours with RSSI/SNR
 Pass: Shows neighbour list (may be empty)
 ```
 
+#### 3.5 Broadcast Ping
+```
+Command: ping
+Expected: FLOOD test packet sent, TX counter increments
+Pass: "[P] #N" and "[P] TX ok" messages displayed
+```
+
+#### 3.6 Directed Ping
+```
+Command: ping A3
+Expected: Directed ping sent to node A3, waits for PONG
+Pass: "[P] -> A3 #N" and "[P] TX ok" displayed
+      If node A3 is reachable: "[P] PONG A3 <name> rssi=<val> snr=<val>dB p=<hops>"
+Note: Requires a second node with hash A3 to verify PONG response
+```
+
 ---
 
 ### 4. Telemetry Tests

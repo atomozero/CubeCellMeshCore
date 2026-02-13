@@ -132,19 +132,43 @@ Custom implementation optimized for CubeCell:
              └─────────────┘           └─────────────┘           └─────────────┘
 ```
 
+## Hardware: ASR6501 SiP
+
+The ASR6501 is a System-in-Package combining:
+- **CPU**: ARM Cortex-M0+ @ 48 MHz (ARMv6-M, no FPU, no HW divider)
+- **Radio**: Semtech SX1262 (connected via internal SPI, not user-accessible)
+- **Deep sleep**: ~3.5 uA (ILO 32 kHz keeps WDT/RTC running, full SRAM retention)
+
+Key hardware constraints:
+- Single SPI bus consumed by SX1262 (no external SPI peripherals)
+- Single ADC channel (shared with VBAT measurement)
+- No hardware FPU (all float ops are software-emulated)
+- EEPROM emulated via flash pages (~100K erase cycles per page)
+- `millis()` stops during `CySysPmDeepSleep()`, restored via `RtcGetTimerValue()`
+- P4_1 (SPI MISO) must be set ANALOG during deep sleep to prevent current leakage
+
 ## Memory Layout
 
-### Flash (131KB total)
-- Firmware code: ~130KB (99.3%)
-- Ed25519 compact implementation saves ~97KB
+### Flash (128 KB total)
+- Firmware code: ~128 KB (97.7%), ~3 KB free
+- Ed25519 compact implementation saves ~97KB vs standard tables
 
-### RAM (16KB total)
-- Global state: ~8KB (49.5%)
-- Stack and heap: ~8KB available
+### RAM (16 KB total)
+- Static globals (.data + .bss): ~8.1 KB (49.7%)
+- Stack (PSoC 4000 default): ~2 KB
+- Heap (RadioLib, Crypto): ~1-2 KB
+- Free at runtime: ~4 KB (shared between stack growth and heap)
 
-### EEPROM
-- NodeConfig (0x00): Power settings, passwords, report config
-- Identity (0x80): Ed25519 keys, node name, location
+Crypto functions (Ed25519, AES) allocate 128-256 byte local buffers on the stack.
+Deep call chains risk silent stack overflow.
+
+### EEPROM (emulated, 512 bytes)
+- Offset 0x00: NodeConfig (~112 bytes) - power, passwords, report/alert settings
+- Offset 0x80: Identity (~132 bytes) - Ed25519 keys, node name, location
+- Offset 0x118: PersistentStats (~48 bytes) - lifetime counters, CRC16
+
+Flash wear: auto-save every 5 min = ~288 writes/day = ~347 days at 100K cycles.
+For long-term deployments, increase `STATS_SAVE_INTERVAL_MS`.
 
 ## Build Configurations
 
@@ -178,6 +202,7 @@ The following modules are candidates for extraction from main.cpp:
 
 4. **Messaging** (~500 lines)
    - `sendAdvert()` - ADVERT transmission
-   - `sendPing()` - Test packet
+   - `sendPing()` - Broadcast test packet
+   - `sendDirectedPing()` / `sendPong()` - Directed ping/pong
    - `sendDailyReport()` - Scheduled reports
    - `sendNodeAlert()` - Node discovery alerts

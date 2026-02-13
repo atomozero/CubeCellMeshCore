@@ -18,9 +18,11 @@ MeshCore-compatible repeater firmware for Heltec CubeCell HTCC-AB01.
 ## Hardware
 
 - **Board**: Heltec CubeCell HTCC-AB01
-- **Radio**: SX1262 LoRa transceiver
-- **Flash**: 131KB (96.3% used)
-- **RAM**: 16KB (51.3% used)
+- **MCU**: ASR6501 SiP (ARM Cortex-M0+ @ 48 MHz + SX1262)
+- **Radio**: SX1262 LoRa transceiver (integrated, no FPU)
+- **Flash**: 128 KB (97.7% used, ~3 KB free)
+- **RAM**: 16 KB (49.7% static, ~4 KB free at runtime incl. stack/heap)
+- **Deep sleep**: ~3.5 uA (MCU + radio)
 
 ## Quick Start
 
