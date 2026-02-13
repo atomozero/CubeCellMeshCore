@@ -215,7 +215,8 @@ Commands available via encrypted mesh messages:
 - `set flood.max <n>` - Max flood hops
 - `name <name>` - Change node name
 - `location <lat> <lon>` - Set location
-- `ping` - Send test packet
+- `ping` - Send broadcast test packet (FLOOD)
+- `ping <hash>` - Directed ping to node `<hash>`, auto-PONG reply
 - `rxboost [on|off]` - Show or toggle RX boost
 - `advert` - Trigger ADVERT
 - `advert interval <s>` - Set interval

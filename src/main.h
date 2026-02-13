@@ -393,6 +393,7 @@ void processCommand(char* cmd);
 
 // Ping / Test
 void sendPing();
+void sendDirectedPing(uint8_t targetHash);
 uint32_t getPacketId(MCPacket* pkt);
 
 // ADVERT

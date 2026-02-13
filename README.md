@@ -115,6 +115,13 @@ Connect at 115200 baud. Type `help` for command list.
 | `ratelimit on\|off` | Enable/disable rate limiting |
 | `ratelimit reset` | Reset rate limit counters |
 
+### Ping
+
+| Command | Description |
+|---------|-------------|
+| `ping` | Send broadcast test packet (FLOOD) |
+| `ping <hash>` | Directed ping to node `<hash>`, auto-PONG reply |
+
 ### System
 
 | Command | Description |

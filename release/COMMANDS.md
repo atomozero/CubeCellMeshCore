@@ -79,7 +79,8 @@ The destination key is set automatically when an admin logs in from the MeshCore
 | `mode 0\|1\|2` | Set power mode (0=perf, 1=balanced, 2=powersave) |
 | `set repeat on\|off` | Enable/disable packet repeating |
 | `set flood.max <n>` | Set max flood hops (1-15) |
-| `ping` | Send test packet |
+| `ping` | Send broadcast test packet (FLOOD) |
+| `ping <hash>` | Directed ping to node `<hash>`, auto-PONG reply |
 | `reset` | Reset configuration to defaults |
 | `reboot` | Restart device |
 
@@ -103,7 +104,7 @@ Once authenticated via the MeshCore app, you can send CLI commands remotely.
 ### Admin-only commands (remote)
 - `name`, `location`, `passwd`, `nodetype`
 - `set repeat/password/guest/flood.max`
-- `ping`, `rxboost [on|off]`
+- `ping`, `ping <hash>`, `rxboost [on|off]`
 - `advert`, `save`, `reset`, `reboot`
 
 ## Radio Settings (EU868)

@@ -81,7 +81,8 @@ Connect at **115200 baud** to access the serial console.
 |---------|-------------|
 | `advert` | Send ADVERT now |
 | `contacts` | List known contacts |
-| `ping` | Send test packet |
+| `ping` | Send broadcast test packet (FLOOD) |
+| `ping <hash>` | Directed ping to node `<hash>`, auto-PONG reply |
 
 ## MeshCore App Connection
 

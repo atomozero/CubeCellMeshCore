@@ -529,6 +529,11 @@ void processCommand(char* cmd) {
     else if (strcmp(cmd, "ping") == 0) {
         sendPing();
     }
+    else if (strncmp(cmd, "ping ", 5) == 0) {
+        uint8_t h = (uint8_t)strtoul(cmd + 5, NULL, 16);
+        if (h != 0) { sendDirectedPing(h); }
+        else { LOG_RAW("Use: ping <hex>\n\r"); }
+    }
     else if (strcmp(cmd, "rssi") == 0) {
         LOG_RAW("RSSI:%d SNR:%d.%02ddB\n\r", lastRssi, lastSnr/4, abs(lastSnr%4)*25);
     }
@@ -840,6 +845,11 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     else if (strcmp(cmd, "ping") == 0) {
         sendPing();
         RESP_APPEND("ping sent\n");
+    }
+    else if (strncmp(cmd, "ping ", 5) == 0) {
+        uint8_t h = (uint8_t)strtoul(cmd + 5, NULL, 16);
+        if (h != 0) { sendDirectedPing(h); RESP_APPEND("ping->%02X\n", h); }
+        else { RESP_APPEND("E:hex\n"); }
     }
     else if (strcmp(cmd, "rxboost on") == 0) {
         rxBoostEnabled = true;
@@ -1274,6 +1284,62 @@ void sendPing() {
     }
 
     startReceive();
+}
+
+void sendDirectedPing(uint8_t targetHash) {
+    MCPacket pkt;
+    pkt.clear();
+    pkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1);
+
+    uint8_t myHash = nodeIdentity.getNodeHash();
+    pkt.path[0] = myHash;
+    pkt.pathLen = 1;
+
+    // Payload: [destHash][srcHash]['D']['P'][text: "#N name"]
+    pingCounter++;
+    pkt.payload[0] = targetHash;
+    pkt.payload[1] = myHash;
+    pkt.payload[2] = 'D';
+    pkt.payload[3] = 'P';
+    pkt.payloadLen = 4 + snprintf((char*)&pkt.payload[4], MC_MAX_PAYLOAD_SIZE - 4,
+                                   "#%u %s", pingCounter, nodeIdentity.getNodeName());
+
+    LOG(TAG_PING " -> %02X #%u\n\r", targetHash, pingCounter);
+
+    uint32_t id = getPacketId(&pkt);
+    packetCache.addIfNew(id);
+
+    if (transmitPacket(&pkt)) {
+        LOG(TAG_PING " TX ok\n\r");
+    } else {
+        LOG(TAG_PING " TX fail\n\r");
+    }
+    startReceive();
+}
+
+static void sendPong(uint8_t targetHash, MCPacket* rxPkt) {
+    MCPacket pkt;
+    pkt.clear();
+    pkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1);
+
+    uint8_t myHash = nodeIdentity.getNodeHash();
+    pkt.path[0] = myHash;
+    pkt.pathLen = 1;
+
+    // Payload: [destHash][srcHash]['P']['O'][text: "name rssi"]
+    pkt.payload[0] = targetHash;
+    pkt.payload[1] = myHash;
+    pkt.payload[2] = 'P';
+    pkt.payload[3] = 'O';
+    pkt.payloadLen = 4 + snprintf((char*)&pkt.payload[4], MC_MAX_PAYLOAD_SIZE - 4,
+                                   "%s %d", nodeIdentity.getNodeName(), rxPkt->rssi);
+
+    LOG(TAG_PING " PONG -> %02X\n\r", targetHash);
+
+    uint32_t id = getPacketId(&pkt);
+    packetCache.addIfNew(id);
+    txQueue.add(&pkt);
+    txCount++;
 }
 
 //=============================================================================
@@ -2355,10 +2421,26 @@ void processReceivedPacket(MCPacket* pkt) {
             }
         }
     }
-    // Handle TXT_MSG (MC_PAYLOAD_PLAIN) - may contain CLI commands
+    // Handle MC_PAYLOAD_PLAIN: directed ping/pong or TXT_MSG CLI
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_PLAIN) {
-        if (pkt->payloadLen >= 10 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
-            // Rate limit requests
+        if (pkt->payloadLen >= 4 && pkt->payload[2] == 'D' && pkt->payload[3] == 'P'
+            && pkt->payload[0] == nodeIdentity.getNodeHash()) {
+            // Directed PING for us - respond with PONG
+            LOG(TAG_PING " from %02X %s\n\r", pkt->payload[1],
+                pkt->payloadLen > 4 ? (char*)&pkt->payload[4] : "");
+            sendPong(pkt->payload[1], pkt);
+        }
+        else if (pkt->payloadLen >= 4 && pkt->payload[2] == 'P' && pkt->payload[3] == 'O'
+                 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
+            // PONG response for us
+            LOG(TAG_PING " PONG %02X %s rssi=%d snr=%d.%ddB p=%d\n\r",
+                pkt->payload[1],
+                pkt->payloadLen > 4 ? (char*)&pkt->payload[4] : "",
+                pkt->rssi, pkt->snr / 4, abs(pkt->snr % 4) * 25,
+                pkt->pathLen);
+        }
+        else if (pkt->payloadLen >= 10 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
+            // TXT_MSG CLI
             if (!repeaterHelper.allowRequest()) {
                 statsRecordRateLimited();
                 LOG(TAG_AUTH " TXT lim\n\r");
