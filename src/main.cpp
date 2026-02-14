@@ -1831,26 +1831,18 @@ bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int
 }
 
 //=============================================================================
-// Mesh Health Monitor
+// Mesh Health Monitor (passive - no TX, diagnostic only)
 //=============================================================================
 void healthCheck() {
-    if (!alertEnabled || !isPubKeySet(alertDestPubKey)) return;
-
     uint32_t now = millis();
     for (uint8_t i = 0; i < seenNodes.getCount(); i++) {
         const SeenNode* n = seenNodes.getNode(i);
         if (!n || n->lastSeen == 0 || n->pktCount < 3) continue;
 
-        uint32_t elapsed = now - n->lastSeen;
-
-        // Check offline (>30min, not already alerted)
-        if (elapsed > HEALTH_OFFLINE_MS && !n->offlineAlerted) {
-            char msg[40];
-            snprintf(msg, sizeof(msg), "OFFLINE %02X %s %lum",
-                n->hash, n->name[0] ? n->name : "?", elapsed / 60000);
-            sendNodeAlert(n->name[0] ? n->name : "?", n->hash, 0, n->lastRssi);
-            // Cast away const to set flag (node is in our tracker)
+        // Mark offline nodes (flag used by 'health' command display)
+        if ((now - n->lastSeen) > HEALTH_OFFLINE_MS && !n->offlineAlerted) {
             ((SeenNode*)n)->offlineAlerted = true;
+            LOG(TAG_NODE " %02X %s offline\n\r", n->hash, n->name[0] ? n->name : "?");
         }
     }
 }
