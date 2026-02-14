@@ -270,6 +270,17 @@ public:
         }
     }
 
+    // Set location from pre-scaled integers (microdegrees, 1e-6)
+    void setLocationInt(int32_t latE6, int32_t lonE6) {
+        identity.latitude = latE6;
+        identity.longitude = lonE6;
+        if (latE6 != 0 || lonE6 != 0) {
+            identity.flags |= MC_FLAG_HAS_LOCATION;
+        } else {
+            identity.flags &= ~MC_FLAG_HAS_LOCATION;
+        }
+    }
+
     /**
      * Clear location
      */
@@ -366,9 +377,9 @@ public:
         Serial.println("...");
         Serial.printf("Flags: 0x%02X\n\r", identity.flags);
         if (hasLocation()) {
-            Serial.printf("Location: %.6f, %.6f\n\r",
-                         identity.latitude / 1000000.0f,
-                         identity.longitude / 1000000.0f);
+            Serial.printf("Location: %ld.%06ld, %ld.%06ld\n\r",
+                         identity.latitude/1000000, abs(identity.latitude%1000000),
+                         identity.longitude/1000000, abs(identity.longitude%1000000));
         }
     }
 };

@@ -33,82 +33,409 @@ static inline bool isPubKeySet(const uint8_t* key) {
     return false;
 }
 
+// Parse decimal string to fixed-point int32 with 6 decimal places
+// "45.123456" -> 45123456, "-12.5" -> -12500000
+// Returns true on success
+static bool parseFixed6(const char* s, int32_t* out) {
+    if (!s || !*s) return false;
+    bool neg = false;
+    if (*s == '-') { neg = true; s++; }
+    int32_t whole = 0;
+    while (*s >= '0' && *s <= '9') { whole = whole * 10 + (*s - '0'); s++; }
+    int32_t frac = 0;
+    if (*s == '.') {
+        s++;
+        int32_t mul = 100000;
+        for (int i = 0; i < 6 && *s >= '0' && *s <= '9'; i++) {
+            frac += (*s - '0') * mul;
+            mul /= 10;
+            s++;
+        }
+    }
+    *out = (whole * 1000000 + frac) * (neg ? -1 : 1);
+    return true;
+}
+
+// Parse decimal string to uint32 with 3 decimal places (for MHz)
+// "869.618" -> 869618
+static bool parseMHz3(const char* s, uint32_t* out) {
+    if (!s || !*s) return false;
+    uint32_t whole = 0;
+    while (*s >= '0' && *s <= '9') { whole = whole * 10 + (*s - '0'); s++; }
+    uint32_t frac = 0;
+    if (*s == '.') {
+        s++;
+        uint32_t mul = 100;
+        for (int i = 0; i < 3 && *s >= '0' && *s <= '9'; i++) {
+            frac += (*s - '0') * mul;
+            mul /= 10;
+            s++;
+        }
+    }
+    *out = whole * 1000 + frac;
+    return true;
+}
+
+// Parse decimal string to uint32 with 1 decimal place (for kHz bandwidth)
+// "62.5" -> 625
+static bool parseBW1(const char* s, uint32_t* out) {
+    if (!s || !*s) return false;
+    uint32_t whole = 0;
+    while (*s >= '0' && *s <= '9') { whole = whole * 10 + (*s - '0'); s++; }
+    uint32_t frac = 0;
+    if (*s == '.') {
+        s++;
+        if (*s >= '0' && *s <= '9') frac = *s - '0';
+    }
+    *out = whole * 10 + frac;
+    return true;
+}
+
+//=============================================================================
+// Unified CLI Output Abstraction
+//=============================================================================
+// CmdCtx allows shared command handlers to output to either Serial or a buffer
+struct CmdCtx {
+    char* buf;        // NULL for serial output
+    uint16_t len;     // current position in buffer
+    uint16_t maxLen;  // buffer capacity (0 for serial)
+};
+
+static void cmdPrint(CmdCtx* ctx, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+static void cmdPrint(CmdCtx* ctx, const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    if (ctx->buf) {
+        int rc = vsnprintf(ctx->buf + ctx->len, ctx->maxLen - ctx->len, fmt, ap);
+        if (rc > 0 && ctx->len + rc < ctx->maxLen) ctx->len += rc;
+    } else {
+        #ifndef SILENT
+        char tmp[96];
+        vsnprintf(tmp, sizeof(tmp), fmt, ap);
+        Serial.print(tmp);
+        #endif
+    }
+    va_end(ap);
+}
+
+#define CP(...) cmdPrint(&ctx, __VA_ARGS__)
+
+// Returns true if command was handled
+static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
+    // --- Read-only commands ---
+    if (strcmp(cmd, "status") == 0) {
+        CP("FW:%s %s(%02X) Up:%lus T:%s\n",
+            FIRMWARE_VERSION, nodeIdentity.getNodeName(), nodeIdentity.getNodeHash(),
+            millis() / 1000, timeSync.isSynchronized() ? "sync" : "nosync");
+    }
+    else if (strcmp(cmd, "stats") == 0) {
+        CP("RX:%lu TX:%lu FWD:%lu E:%lu ADV:%lu/%lu Q:%d\n",
+            rxCount, txCount, fwdCount, errCount, advTxCount, advRxCount, txQueue.getCount());
+    }
+    else if (strcmp(cmd, "time") == 0) {
+        if (timeSync.isSynchronized()) CP("T:%lu sync\n", timeSync.getTimestamp());
+        else CP("T:nosync\n");
+    }
+    else if (strcmp(cmd, "telemetry") == 0) {
+        telemetry.update();
+        CP("Batt:%dmV(%d%%) Up:%lus\n", telemetry.getBatteryMv(), telemetry.getBatteryPercent(), millis() / 1000);
+    }
+    else if (strcmp(cmd, "nodes") == 0) {
+        uint8_t count = seenNodes.getCount();
+        CP("Nodes:%d\n", count);
+        for (uint8_t i = 0; i < count; i++) {
+            const SeenNode* n = seenNodes.getNode(i);
+            if (n && n->lastSeen > 0) {
+                if (ctx.buf && ctx.len >= ctx.maxLen - 48) break;
+                uint32_t ago = (millis() - n->lastSeen) / 1000;
+                if (timeSync.isSynchronized()) {
+                    uint32_t ts = timeSync.getTimestamp() - ago;
+                    TimeSync::DateTime dt;
+                    TimeSync::timestampToDateTime(ts, dt);
+                    CP("%02X %s %ddBm %02d/%02d/%02d %02d:%02d\n", n->hash, n->name[0]?n->name:"-", n->lastRssi, dt.day, dt.month, dt.year % 100, dt.hour, dt.minute);
+                } else {
+                    CP("%02X %s %ddBm %lus\n", n->hash, n->name[0]?n->name:"-", n->lastRssi, ago);
+                }
+            }
+        }
+    }
+    else if (strcmp(cmd, "neighbours") == 0 || strcmp(cmd, "neighbors") == 0) {
+        NeighbourTracker& nb = repeaterHelper.getNeighbours();
+        uint8_t cnt = nb.getCount();
+        CP("Nbr:%d\n", cnt);
+        if (!ctx.buf) {
+            for (uint8_t i = 0; i < cnt; i++) {
+                const NeighbourInfo* n = nb.getNeighbour(i);
+                if (n) {
+                    uint32_t ago = (millis() - n->lastHeard) / 1000;
+                    CP(" %02X%02X%02X%02X%02X%02X rssi=%d snr=%d ago=%lus\n",
+                        n->pubKeyPrefix[0], n->pubKeyPrefix[1], n->pubKeyPrefix[2],
+                        n->pubKeyPrefix[3], n->pubKeyPrefix[4], n->pubKeyPrefix[5],
+                        n->rssi, n->snr, ago);
+                }
+            }
+        }
+    }
+    else if (strcmp(cmd, "identity") == 0) {
+        CP("%s %02X\n", nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
+        if (nodeIdentity.hasLocation()) {
+            int32_t lat = nodeIdentity.getLatitude();
+            int32_t lon = nodeIdentity.getLongitude();
+            CP("Loc:%ld.%06ld,%ld.%06ld\n", lat/1000000, abs(lat%1000000), lon/1000000, abs(lon%1000000));
+        }
+        if (!ctx.buf) {
+            const uint8_t* pk = nodeIdentity.getPublicKey();
+            CP("PK:");
+            for (int i = 0; i < 32; i++) CP("%02x", pk[i]);
+            CP("\n");
+        }
+    }
+    else if (strcmp(cmd, "location") == 0) {
+        if (nodeIdentity.hasLocation()) {
+            int32_t lat = nodeIdentity.getLatitude();
+            int32_t lon = nodeIdentity.getLongitude();
+            CP("%ld.%06ld,%ld.%06ld\n", lat/1000000, abs(lat%1000000), lon/1000000, abs(lon%1000000));
+        } else CP("No loc\n");
+    }
+    else if (strcmp(cmd, "repeat") == 0) {
+        CP("Rpt:%s hops:%d\n", repeaterHelper.isRepeatEnabled() ? "on" : "off", repeaterHelper.getMaxFloodHops());
+    }
+    else if (strcmp(cmd, "advert interval") == 0) {
+        CP("Int:%lus next:%lus\n", advertGen.getInterval() / 1000, advertGen.getTimeUntilNext());
+    }
+    else if (strcmp(cmd, "radiostats") == 0) {
+        const RadioStats& rs = repeaterHelper.getRadioStats();
+        CP("Noise:%ddBm RSSI:%d SNR:%d.%ddB\n", rs.noiseFloor, rs.lastRssi, rs.lastSnr/4, abs(rs.lastSnr%4)*25);
+        CP("Airtime TX:%lus RX:%lus\n", rs.txAirTimeSec, rs.rxAirTimeSec);
+    }
+    else if (strcmp(cmd, "packetstats") == 0) {
+        const PacketStats& ps = repeaterHelper.getPacketStats();
+        CP("RX:%lu TX:%lu FL:%lu/%lu DR:%lu/%lu\n",
+            ps.numRecvPackets, ps.numSentPackets,
+            ps.numRecvFlood, ps.numSentFlood, ps.numRecvDirect, ps.numSentDirect);
+    }
+    else if (strcmp(cmd, "radio") == 0) {
+        { uint32_t fM = (uint32_t)(MC_FREQUENCY * 1000); uint32_t bT = (uint32_t)(MC_BANDWIDTH * 10);
+        CP("%lu.%03lu BW%lu.%lu SF%d CR%d %ddBm\n", fM/1000, fM%1000, bT/10, bT%10, MC_SPREADING, MC_CODING_RATE, MC_TX_POWER); }
+        if (tempRadioActive) {
+            uint32_t fM = (uint32_t)(tempFrequency * 1000); uint32_t bT = (uint32_t)(tempBandwidth * 10);
+            CP("Tmp:%lu.%03lu BW%lu.%lu SF%d CR%d\n", fM/1000, fM%1000, bT/10, bT%10, tempSpreadingFactor, tempCodingRate);
+        }
+    }
+    else if (strcmp(cmd, "lifetime") == 0) {
+        const PersistentStats* ps = getPersistentStats();
+        CP("Boots:%u Up:%lus RX:%lu TX:%lu FWD:%lu\n",
+            ps->bootCount, statsGetTotalUptime(), ps->totalRxPackets, ps->totalTxPackets, ps->totalFwdPackets);
+    }
+    else if (strcmp(cmd, "health") == 0) {
+        uint8_t cnt = seenNodes.getCount();
+        uint32_t now = millis();
+        uint8_t offline = 0;
+        for (uint8_t i = 0; i < cnt; i++) {
+            const SeenNode* n = seenNodes.getNode(i);
+            if (n && (now - n->lastSeen) > HEALTH_OFFLINE_MS) offline++;
+        }
+        CP("Nodes:%d Off:%d Alert:%s\n", cnt, offline, alertEnabled ? "on" : "off");
+        for (uint8_t i = 0; i < cnt; i++) {
+            if (ctx.buf && ctx.len >= ctx.maxLen - 32) break;
+            const SeenNode* n = seenNodes.getNode(i);
+            if (n && n->lastSeen > 0) {
+                uint32_t ago = (now - n->lastSeen) / 1000;
+                CP("%02X %d/%ddB %lus%s\n", n->hash, n->lastSnr/4, n->snrAvg/4, ago,
+                    ago > HEALTH_OFFLINE_MS/1000 ? " OFF" : "");
+            }
+        }
+    }
+    else if (strcmp(cmd, "power") == 0) {
+        CP("M:%d RxB:%s DS:%s\n", powerSaveMode,
+            rxBoostEnabled ? "on" : "off", deepSleepEnabled ? "on" : "off");
+    }
+    else if (strcmp(cmd, "alert") == 0) {
+        CP("Alert:%s Dest:%s\n", alertEnabled ? "on" : "off",
+            isPubKeySet(alertDestPubKey) ? "set" : "none");
+    }
+    else if (strcmp(cmd, "ratelimit") == 0) {
+        CP("RL:%s L:%lu R:%lu F:%lu\n",
+            repeaterHelper.isRateLimitEnabled() ? "on" : "off",
+            repeaterHelper.getLoginLimiter().getTotalBlocked(),
+            repeaterHelper.getRequestLimiter().getTotalBlocked(),
+            repeaterHelper.getForwardLimiter().getTotalBlocked());
+    }
+    else if (strcmp(cmd, "sleep") == 0) {
+        CP("Sleep:%s\n", deepSleepEnabled ? "on" : "off");
+    }
+    else if (strcmp(cmd, "rxboost") == 0) {
+        CP("RxB:%s\n", rxBoostEnabled ? "on" : "off");
+    }
+    // --- Admin-only commands ---
+    else if (!isAdmin) {
+        return false;  // not a read-only command; caller handles admin gate
+    }
+    else if (strcmp(cmd, "set repeat on") == 0) {
+        repeaterHelper.setRepeatEnabled(true); CP("rpt:on\n");
+    }
+    else if (strcmp(cmd, "set repeat off") == 0) {
+        repeaterHelper.setRepeatEnabled(false); CP("rpt:off\n");
+    }
+    else if (strncmp(cmd, "set flood.max ", 14) == 0) {
+        uint8_t hops = atoi(cmd + 14);
+        if (hops >= 1 && hops <= 15) { repeaterHelper.setMaxFloodHops(hops); CP("hops:%d\n", hops); }
+    }
+    else if (strncmp(cmd, "name ", 5) == 0) {
+        const char* n = cmd + 5;
+        if (strlen(n) > 0 && strlen(n) < 16) {
+            nodeIdentity.setNodeName(n); nodeIdentity.save();
+            CP("name=%s\n", n);
+        } else CP("E:1-15\n");
+    }
+    else if (strcmp(cmd, "name") == 0) {
+        CP("Name:%s\n", nodeIdentity.getNodeName());
+    }
+    else if (strcmp(cmd, "location clear") == 0) {
+        nodeIdentity.clearLocation(); nodeIdentity.save();
+        CP("loc clr\n");
+    }
+    else if (strncmp(cmd, "location ", 9) == 0) {
+        char* args = (char*)(cmd + 9);
+        char* space = strchr(args, ' ');
+        if (space) {
+            *space = '\0';
+            int32_t latE6, lonE6;
+            if (parseFixed6(args, &latE6) && parseFixed6(space + 1, &lonE6) &&
+                latE6 >= -90000000 && latE6 <= 90000000 &&
+                lonE6 >= -180000000 && lonE6 <= 180000000) {
+                nodeIdentity.setLocationInt(latE6, lonE6); nodeIdentity.save();
+                CP("%ld.%06ld,%ld.%06ld\n", latE6/1000000, abs(latE6%1000000), lonE6/1000000, abs(lonE6%1000000));
+            } else CP("E:coords\n");
+        } else CP("E:lat lon\n");
+    }
+    else if (strncmp(cmd, "advert interval ", 16) == 0) {
+        uint32_t interval = strtoul(cmd + 16, NULL, 10);
+        if (interval >= 60 && interval <= 86400) {
+            advertGen.setInterval(interval * 1000);
+            CP("int:%lus\n", interval);
+        } else CP("E:60-86400\n");
+    }
+    else if (strcmp(cmd, "advert") == 0) {
+        sendAdvert(true); CP("adv sent\n");
+    }
+    else if (strcmp(cmd, "advert local") == 0) {
+        sendAdvert(false); CP("adv local\n");
+    }
+    else if (strcmp(cmd, "ping") == 0) {
+        sendPing(); CP("ping sent\n");
+    }
+    else if (strncmp(cmd, "ping ", 5) == 0) {
+        uint8_t h = (uint8_t)strtoul(cmd + 5, NULL, 16);
+        if (h != 0) { sendDirectedPing(h); CP("ping->%02X\n", h); }
+        else CP("E:hex\n");
+    }
+    else if (strncmp(cmd, "trace ", 6) == 0) {
+        uint8_t h = (uint8_t)strtoul(cmd + 6, NULL, 16);
+        if (h != 0) { sendDirectedTrace(h); CP("trace->%02X\n", h); }
+        else CP("E:hex\n");
+    }
+    else if (strcmp(cmd, "rxboost on") == 0) {
+        rxBoostEnabled = true; applyPowerSettings(); saveConfig();
+        CP("RxB:ON\n");
+    }
+    else if (strcmp(cmd, "rxboost off") == 0) {
+        rxBoostEnabled = false; applyPowerSettings(); saveConfig();
+        CP("RxB:OFF\n");
+    }
+    else if (strcmp(cmd, "sleep on") == 0) {
+        deepSleepEnabled = true; saveConfig(); CP("sleep:on\n");
+    }
+    else if (strcmp(cmd, "sleep off") == 0) {
+        deepSleepEnabled = false; saveConfig(); CP("sleep:off\n");
+    }
+    else if (strcmp(cmd, "ratelimit on") == 0) {
+        repeaterHelper.setRateLimitEnabled(true); CP("RL:on\n");
+    }
+    else if (strcmp(cmd, "ratelimit off") == 0) {
+        repeaterHelper.setRateLimitEnabled(false); CP("RL:off\n");
+    }
+    else if (strcmp(cmd, "ratelimit reset") == 0) {
+        repeaterHelper.resetRateLimitStats(); CP("RL reset\n");
+    }
+    else if (strcmp(cmd, "alert on") == 0) {
+        if (isPubKeySet(alertDestPubKey)) { alertEnabled = true; saveConfig(); CP("alert:on\n"); }
+        else CP("E:no dest\n");
+    }
+    else if (strcmp(cmd, "alert off") == 0) {
+        alertEnabled = false; saveConfig(); CP("alert:off\n");
+    }
+    else if (strcmp(cmd, "alert clear") == 0) {
+        memset(alertDestPubKey, 0, REPORT_PUBKEY_SIZE);
+        alertEnabled = false; saveConfig(); CP("alert clr\n");
+    }
+    else if (strncmp(cmd, "alert dest ", 11) == 0) {
+        const char* arg = cmd + 11;
+        Contact* c = contactMgr.findByName(arg);
+        if (c) {
+            memcpy(alertDestPubKey, c->pubKey, REPORT_PUBKEY_SIZE);
+            saveConfig(); CP("alert->%s\n", c->name);
+        }
+        else if (!ctx.buf && strlen(arg) >= 64) {
+            // Hex pubkey input only from serial
+            for (int i = 0; i < 32; i++) {
+                char byte[3] = {arg[i*2], arg[i*2+1], 0};
+                alertDestPubKey[i] = strtoul(byte, NULL, 16);
+            }
+            saveConfig();
+            CP("Dest:%02X%02X%02X%02X\n", alertDestPubKey[0], alertDestPubKey[1], alertDestPubKey[2], alertDestPubKey[3]);
+        }
+        else CP("E:not found\n");
+    }
+    else if (strncmp(cmd, "mode ", 5) == 0) {
+        char m = cmd[5];
+        if (m >= '0' && m <= '2') { powerSaveMode = m - '0'; saveConfig(); CP("mode:%c\n", m); }
+        else CP("E:0-2\n");
+    }
+    else if (strcmp(cmd, "save") == 0) {
+        saveConfig(); CP("saved\n");
+    }
+    else if (strcmp(cmd, "reset") == 0) {
+        resetConfig(); applyPowerSettings(); CP("reset\n");
+    }
+    else if (strcmp(cmd, "reboot") == 0) {
+        CP("reboot\n");
+    }
+    else {
+        return false;  // command not handled
+    }
+    return true;
+}
+
 //=============================================================================
 // Serial Command Handler
 //=============================================================================
 #ifndef SILENT
-char cmdBuffer[48];  // Reduced from 64 to save RAM
+char cmdBuffer[48];
 uint8_t cmdPos = 0;
 
-// Compact command handler - no ANSI box-drawing tables
 void processCommand(char* cmd) {
+    CmdCtx ctx = { NULL, 0, 0 };
+
+    // Try shared dispatcher first (serial is always admin)
+    if (dispatchSharedCommand(cmd, ctx, true)) {
+        // "reboot" needs special handling for serial
+        if (strcmp(cmd, "reboot") == 0) {
+            delay(100);
+            #ifdef CUBECELL
+            NVIC_SystemReset();
+            #endif
+        }
+        return;
+    }
+
+    // Serial-only commands
     if (strcmp(cmd, "?") == 0 || strcmp(cmd, "help") == 0) {
         LOG_RAW("status stats lifetime radiostats packetstats advert nodes contacts\n\r"
                 "neighbours telemetry identity name location time nodetype passwd\n\r"
                 "sleep rxboost radio tempradio ratelimit savestats alert newid\n\r"
                 "power acl repeat ping trace rssi mode set report health\n\r"
                 "reset save reboot\n\r");
-    }
-    else if (strcmp(cmd, "status") == 0) {
-        LOG_RAW("FW:%s Node:%s Hash:%02X\n\r", FIRMWARE_VERSION, nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
-        LOG_RAW("Freq:%.3f BW:%.1f SF:%d CR:4/%d TX:%ddBm%s\n\r",
-            getCurrentFrequency(), getCurrentBandwidth(), getCurrentSpreadingFactor(),
-            getCurrentCodingRate(), MC_TX_POWER, tempRadioActive ? " [TEMP]" : "");
-        LOG_RAW("Time:%s RSSI:%d SNR:%d.%d\n\r", timeSync.isSynchronized()?"sync":"nosync", lastRssi, lastSnr/4, abs(lastSnr%4)*25);
-    }
-    else if (strcmp(cmd, "stats") == 0) {
-        LOG_RAW("RX:%lu TX:%lu FWD:%lu ERR:%lu\n\r", rxCount, txCount, fwdCount, errCount);
-        LOG_RAW("ADV TX:%lu RX:%lu Q:%d/%d\n\r", advTxCount, advRxCount, txQueue.getCount(), MC_TX_QUEUE_SIZE);
-    }
-    else if (strcmp(cmd, "lifetime") == 0) {
-        const PersistentStats* ps = getPersistentStats();
-        LOG_RAW("Boots:%d Up:%lus\n\r", ps->bootCount, statsGetTotalUptime());
-        LOG_RAW("RX:%lu TX:%lu FWD:%lu\n\r", ps->totalRxPackets, ps->totalTxPackets, ps->totalFwdPackets);
-        LOG_RAW("Nodes:%lu Login:%lu/%lu RLim:%lu\n\r",
-            ps->totalUniqueNodes, ps->totalLogins, ps->totalLoginFails, ps->totalRateLimited);
-    }
-    else if (strcmp(cmd, "savestats") == 0) {
-        savePersistentStats();
-        LOG_RAW("Stats saved\n\r");
-    }
-    else if (strcmp(cmd, "ratelimit") == 0) {
-        LOG_RAW("RateLimit: %s\n\r", repeaterHelper.isRateLimitEnabled() ? "ON" : "OFF");
-        LOG_RAW("Login:%lu/%d Request:%lu/%d Fwd:%lu/%d\n\r",
-            repeaterHelper.getLoginLimiter().getTotalBlocked(), RATE_LIMIT_LOGIN_MAX,
-            repeaterHelper.getRequestLimiter().getTotalBlocked(), RATE_LIMIT_REQUEST_MAX,
-            repeaterHelper.getForwardLimiter().getTotalBlocked(), RATE_LIMIT_FORWARD_MAX);
-    }
-    else if (strncmp(cmd, "ratelimit ", 10) == 0) {
-        if (strcmp(cmd + 10, "on") == 0) {
-            repeaterHelper.setRateLimitEnabled(true);
-            LOG_RAW("RateLimit ON\n\r");
-        } else if (strcmp(cmd + 10, "off") == 0) {
-            repeaterHelper.setRateLimitEnabled(false);
-            LOG_RAW("RateLimit OFF\n\r");
-        } else if (strcmp(cmd + 10, "reset") == 0) {
-            repeaterHelper.resetRateLimitStats();
-            LOG_RAW("RateLimit reset\n\r");
-        }
-    }
-    else if (strcmp(cmd, "advert") == 0) {
-        sendAdvert(true);
-    }
-    else if (strcmp(cmd, "nodes") == 0) {
-        LOG_RAW("Nodes:%d\n\r", seenNodes.getCount());
-        for (uint8_t i = 0; i < seenNodes.getCount(); i++) {
-            const SeenNode* n = seenNodes.getNode(i);
-            if (n) {
-                uint32_t ago = (millis() - n->lastSeen) / 1000;
-                if (timeSync.isSynchronized()) {
-                    uint32_t ts = timeSync.getTimestamp() - ago;
-                    TimeSync::DateTime dt;
-                    TimeSync::timestampToDateTime(ts, dt);
-                    LOG_RAW(" %02X %s %ddBm %02d/%02d/%02d %02d:%02d:%02d\n\r", n->hash, n->name[0]?n->name:"-", n->lastRssi, dt.day, dt.month, dt.year % 100, dt.hour, dt.minute, dt.second);
-                } else {
-                    LOG_RAW(" %02X %s %ddBm %lus ago\n\r", n->hash, n->name[0]?n->name:"-", n->lastRssi, ago);
-                }
-            }
-        }
     }
     else if (strcmp(cmd, "newid") == 0) {
         LOG_RAW("Gen new ID...\n\r");
@@ -117,7 +444,6 @@ void processCommand(char* cmd) {
     }
     #ifdef ENABLE_CRYPTO_TESTS
     else if (strcmp(cmd, "test") == 0) {
-        // RFC 8032 Test Vector 1: empty message - VERIFY test
         const uint8_t pubkey[] = {
             0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7,
             0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
@@ -136,8 +462,6 @@ void processCommand(char* cmd) {
         };
         bool ok = IdentityManager::verify(sig, pubkey, NULL, 0);
         LOG_RAW("RFC8032 Verify (empty msg): %s\n\r", ok ? "PASS" : "FAIL");
-
-        // RFC 8032 Test Vector 1: SIGN test
         const uint8_t seed[] = {
             0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60,
             0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
@@ -154,161 +478,52 @@ void processCommand(char* cmd) {
             0xd2, 0x5b, 0xf5, 0xf0, 0x59, 0x5b, 0xbe, 0x24,
             0x65, 0x51, 0x41, 0x43, 0x8e, 0x7a, 0x10, 0x0b
         };
-
         uint8_t test_pubkey[32];
         uint8_t test_privkey[64];
         ed25519_create_keypair(test_pubkey, test_privkey, seed);
-
         bool pubkey_ok = (memcmp(test_pubkey, pubkey, 32) == 0);
         LOG_RAW("RFC8032 Keypair gen: %s\n\r", pubkey_ok ? "PASS" : "FAIL");
-
         uint8_t test_sig[64];
         ed25519_sign(test_sig, NULL, 0, test_pubkey, test_privkey);
-
         bool sign_ok = (memcmp(test_sig, expected_sig, 64) == 0);
         LOG_RAW("RFC8032 Sign (empty msg): %s\n\r", sign_ok ? "PASS" : "FAIL");
     }
-    #endif // ENABLE_CRYPTO_TESTS
+    #endif
     else if (strcmp(cmd, "nodetype chat") == 0) {
         uint8_t flags = nodeIdentity.getFlags();
         flags = (flags & 0xF0) | MC_TYPE_CHAT_NODE;
-        nodeIdentity.setFlags(flags);
-        nodeIdentity.save();
+        nodeIdentity.setFlags(flags); nodeIdentity.save();
         LOG_RAW("Type: CHAT 0x%02X\n\r", flags);
     }
     else if (strcmp(cmd, "nodetype repeater") == 0) {
         uint8_t flags = nodeIdentity.getFlags();
         flags = (flags & 0xF0) | MC_TYPE_REPEATER;
-        nodeIdentity.setFlags(flags);
-        nodeIdentity.save();
+        nodeIdentity.setFlags(flags); nodeIdentity.save();
         LOG_RAW("Type: RPT 0x%02X\n\r", flags);
     }
     else if (strcmp(cmd, "passwd") == 0) {
         LOG_RAW("Admin: %s  Guest: %s\n\r",
-            sessionManager.getAdminPassword(),
-            sessionManager.getGuestPassword());
+            sessionManager.getAdminPassword(), sessionManager.getGuestPassword());
     }
     else if (strncmp(cmd, "passwd admin ", 13) == 0) {
-        sessionManager.setAdminPassword(cmd + 13);
-        saveConfig();
+        sessionManager.setAdminPassword(cmd + 13); saveConfig();
         LOG_RAW("Admin pwd: %s\n\r", cmd + 13);
     }
     else if (strncmp(cmd, "passwd guest ", 13) == 0) {
-        sessionManager.setGuestPassword(cmd + 13);
-        saveConfig();
+        sessionManager.setGuestPassword(cmd + 13); saveConfig();
         LOG_RAW("Guest pwd: %s\n\r", cmd + 13);
     }
-    else if (strcmp(cmd, "sleep on") == 0) {
-        deepSleepEnabled = true;
-        saveConfig();
-        LOG_RAW("Deep sleep: ON\n\r");
-    }
-    else if (strcmp(cmd, "sleep off") == 0) {
-        deepSleepEnabled = false;
-        saveConfig();
-        LOG_RAW("Sleep: OFF\n\r");
-    }
-    else if (strcmp(cmd, "sleep") == 0) {
-        LOG_RAW("Deep sleep: %s\n\r", deepSleepEnabled ? "ON" : "OFF");
-    }
-    else if (strcmp(cmd, "rxboost on") == 0) {
-        rxBoostEnabled = true;
-        applyPowerSettings();
-        saveConfig();
-        LOG_RAW("RX Boost: ON\n\r");
-    }
-    else if (strcmp(cmd, "rxboost off") == 0) {
-        rxBoostEnabled = false;
-        applyPowerSettings();
-        saveConfig();
-        LOG_RAW("RX Boost: OFF\n\r");
-    }
-    else if (strcmp(cmd, "rxboost") == 0) {
-        LOG_RAW("RX Boost: %s\n\r", rxBoostEnabled ? "ON" : "OFF");
-    }
-    else if (strcmp(cmd, "time") == 0) {
-        if (timeSync.isSynchronized()) {
-            LOG_RAW("Time: %lu (synced)\n\r", timeSync.getTimestamp());
-        } else {
-            LOG_RAW("Time: not synced\n\r");
-        }
-    }
-    else if (strncmp(cmd, "time ", 5) == 0) {
-        uint32_t ts = strtoul(cmd + 5, NULL, 10);
-        if (ts > 1577836800) {
-            timeSync.setTime(ts);
-            LOG_RAW("Time set: %lu\n\r", ts);
-        } else {
-            LOG_RAW("Invalid timestamp\n\r");
-        }
-    }
-    else if (strncmp(cmd, "name ", 5) == 0) {
-        const char* newName = cmd + 5;
-        if (strlen(newName) > 0 && strlen(newName) < 16) {
-            nodeIdentity.setNodeName(newName);
-            nodeIdentity.save();
-            LOG_RAW("Name set: %s\n\r", nodeIdentity.getNodeName());
-        } else {
-            LOG_RAW("Name must be 1-15 chars\n\r");
-        }
-    }
-    else if (strcmp(cmd, "name") == 0) {
-        LOG_RAW("Name: %s\n\r", nodeIdentity.getNodeName());
-    }
-    else if (strcmp(cmd, "location clear") == 0) {
-        nodeIdentity.clearLocation();
-        nodeIdentity.save();
-        LOG_RAW("Location cleared\n\r");
-    }
-    else if (strncmp(cmd, "location ", 9) == 0) {
-        char* args = (char*)(cmd + 9);
-        char* space = strchr(args, ' ');
-        if (space != NULL) {
-            *space = '\0';
-            float lat = atof(args);
-            float lon = atof(space + 1);
-            if (lat >= -90.0f && lat <= 90.0f && lon >= -180.0f && lon <= 180.0f) {
-                nodeIdentity.setLocation(lat, lon);
-                nodeIdentity.save();
-                LOG_RAW("Location: %.6f, %.6f\n\r", lat, lon);
-            } else {
-                LOG_RAW("Invalid coords\n\r");
-            }
-        } else {
-            LOG_RAW("Usage: location LAT LON\n\r");
-        }
-    }
-    else if (strcmp(cmd, "location") == 0) {
-        if (nodeIdentity.hasLocation()) {
-            {
-                int32_t lat = nodeIdentity.getLatitude();
-                int32_t lon = nodeIdentity.getLongitude();
-                LOG_RAW("Location: %ld.%06ld, %ld.%06ld\n\r",
-                    lat/1000000, abs(lat%1000000), lon/1000000, abs(lon%1000000));
-            }
-        } else {
-            LOG_RAW("Location: not set\n\r");
-        }
-    }
-    else if (strcmp(cmd, "identity") == 0) {
-        LOG_RAW("Name: %s  Hash: %02X  Type: %d\n\r",
-            nodeIdentity.getNodeName(), nodeIdentity.getNodeHash(),
-            nodeIdentity.getFlags() & 0x0F);
-        const uint8_t* pk = nodeIdentity.getPublicKey();
-        LOG_RAW("PubKey: ");
-        for (int i = 0; i < 32; i++) LOG_RAW("%02x", pk[i]);
-        LOG_RAW("\n\r");
+    else if (strcmp(cmd, "savestats") == 0) {
+        savePersistentStats(); LOG_RAW("Stats saved\n\r");
     }
     else if (strcmp(cmd, "contacts") == 0) {
         LOG_RAW("Contacts: %d\n\r", contactMgr.getCount());
         for (uint8_t i = 0; i < contactMgr.getCount(); i++) {
             Contact* c = contactMgr.getContact(i);
-            if (c) LOG_RAW(" %02X %s %ddBm\n\r", c->getHash(),
-                c->name[0] ? c->name : "-", c->lastRssi);
+            if (c) LOG_RAW(" %02X %s %ddBm\n\r", c->getHash(), c->name[0] ? c->name : "-", c->lastRssi);
         }
     }
     else if (strncmp(cmd, "contact ", 8) == 0) {
-        // Show full pubkey for a contact by hash: contact XX
         uint8_t hash = strtoul(cmd + 8, NULL, 16);
         Contact* c = contactMgr.findByHash(hash);
         if (c) {
@@ -316,224 +531,12 @@ void processCommand(char* cmd) {
             LOG_RAW("PubKey: ");
             for (int i = 0; i < 32; i++) LOG_RAW("%02X", c->pubKey[i]);
             LOG_RAW("\n\r");
-        } else {
-            LOG_RAW("Contact %02X not found\n\r", hash);
-        }
+        } else LOG_RAW("Contact %02X not found\n\r", hash);
     }
-    else if (strcmp(cmd, "neighbours") == 0 || strcmp(cmd, "neighbors") == 0) {
-        NeighbourTracker& nb = repeaterHelper.getNeighbours();
-        uint8_t cnt = nb.getCount();
-        LOG_RAW("Neighbours: %d\n\r", cnt);
-        for (uint8_t i = 0; i < cnt; i++) {
-            const NeighbourInfo* n = nb.getNeighbour(i);
-            if (n) {
-                uint32_t ago = (millis() - n->lastHeard) / 1000;
-                LOG_RAW(" %02X%02X%02X%02X%02X%02X rssi=%d snr=%d ago=%lus\n\r",
-                    n->pubKeyPrefix[0], n->pubKeyPrefix[1], n->pubKeyPrefix[2],
-                    n->pubKeyPrefix[3], n->pubKeyPrefix[4], n->pubKeyPrefix[5],
-                    n->rssi, n->snr, ago);
-            }
-        }
-    }
-    else if (strncmp(cmd, "advert interval ", 16) == 0) {
-        uint32_t interval = strtoul(cmd + 16, NULL, 10);
-        if (interval >= 60 && interval <= 86400) {
-            advertGen.setInterval(interval * 1000);
-            LOG_RAW("ADVERT interval: %lus\n\r", interval);
-        } else {
-            LOG_RAW("Invalid (60-86400)\n\r");
-        }
-    }
-    else if (strcmp(cmd, "advert interval") == 0) {
-        LOG_RAW("ADVERT interval: %lus (next in %lus)\n\r",
-            advertGen.getInterval() / 1000, advertGen.getTimeUntilNext());
-    }
-    else if (strcmp(cmd, "telemetry") == 0) {
-        telemetry.update();
-        const TelemetryData* t = telemetry.getData();
-        LOG_RAW("Battery: %dmV (%d%%)\n\r", t->batteryMv, telemetry.getBatteryPercent());
-        LOG_RAW("Temp: %dC  Uptime: %lus\n\r", t->temperature, t->uptime);
-        LOG_RAW("RX:%lu TX:%lu FWD:%lu ERR:%lu\n\r",
-            t->rxCount, t->txCount, t->fwdCount, t->errorCount);
-    }
-    #ifdef ENABLE_BATTDEBUG
-    else if (strcmp(cmd, "battdebug") == 0) {
-        #ifdef CUBECELL
-        extern volatile int16 ADC_SAR_Seq_offset[];
-        extern volatile int32 ADC_SAR_Seq_countsPer10Volt[];
-        pinMode(VBAT_ADC_CTL, OUTPUT);
-        digitalWrite(VBAT_ADC_CTL, LOW);
-        delay(100);
-        uint16_t r = analogRead(ADC);
-        pinMode(VBAT_ADC_CTL, INPUT);
-        LOG_RAW("ADC raw=%u\n\r", r);
-        LOG_RAW("ch0 off=%d gain=%ld\n\r", ADC_SAR_Seq_offset[0], (long)ADC_SAR_Seq_countsPer10Volt[0]);
-        int32_t g0 = ADC_SAR_Seq_countsPer10Volt[0];
-        if (g0 != 0) {
-            float mv = ((float)((int32_t)r - ADC_SAR_Seq_offset[0]) * 10000.0f) / (float)g0;
-            LOG_RAW("cal: batt=%.0fmV\n\r", mv * 2.0f);
-        }
-        telemetry.update();
-        LOG_RAW("Telemetry: %dmV (%d%%)\n\r", telemetry.getBatteryMv(), telemetry.getBatteryPercent());
-        #endif
-    }
-    #endif
-    else if (strcmp(cmd, "alert") == 0) {
-        LOG_RAW("Alert:%s Dest:%s\n\r",
-            alertEnabled ? "ON" : "OFF",
-            isPubKeySet(alertDestPubKey) ? "set" : "none");
-    }
-    else if (strcmp(cmd, "alert on") == 0) {
-        if (isPubKeySet(alertDestPubKey)) {
-            alertEnabled = true;
-            saveConfig();
-            LOG_RAW("Alert ON\n\r");
-        } else {
-            LOG_RAW("No dest\n\r");
-        }
-    }
-    else if (strcmp(cmd, "alert off") == 0) {
-        alertEnabled = false;
-        saveConfig();
-        LOG_RAW("Alert OFF\n\r");
-    }
-    else if (strncmp(cmd, "alert dest ", 11) == 0) {
-        const char* arg = cmd + 11;
-        // Try to find contact by name first
-        Contact* c = contactMgr.findByName(arg);
-        if (c) {
-            memcpy(alertDestPubKey, c->pubKey, REPORT_PUBKEY_SIZE);
-            saveConfig();
-            LOG_RAW("Dest:%s(%02X)\n\r", c->name, alertDestPubKey[0]);
-        }
-        // Otherwise try hex pubkey (64 chars = 32 bytes)
-        else if (strlen(arg) >= 64) {
-            for (int i = 0; i < 32; i++) {
-                char byte[3] = {arg[i*2], arg[i*2+1], 0};
-                alertDestPubKey[i] = strtoul(byte, NULL, 16);
-            }
-            saveConfig();
-            LOG_RAW("Dest:%02X%02X%02X%02X\n\r",
-                alertDestPubKey[0], alertDestPubKey[1],
-                alertDestPubKey[2], alertDestPubKey[3]);
-        } else {
-            LOG_RAW("'%s' not found\n\r", arg);
-        }
-    }
-    else if (strcmp(cmd, "alert clear") == 0) {
-        memset(alertDestPubKey, 0, REPORT_PUBKEY_SIZE);
-        alertEnabled = false;
-        saveConfig();
-        LOG_RAW("Alert cleared\n\r");
-    }
-    else if (strcmp(cmd, "alert test") == 0) {
-        if (sendAlertAsChatNode("Test alert")) {
-            LOG_RAW("Test alert sent\n\r");
-        } else {
-            LOG_RAW("Alert not set\n\r");
-        }
-    }
-    // Radio parameters
-    else if (strcmp(cmd, "radio") == 0) {
-        LOG_RAW("Def: %.3f BW%.1f SF%d CR%d %ddBm\n\r",
-            (float)MC_FREQUENCY, (float)MC_BANDWIDTH, MC_SPREADING, MC_CODING_RATE, MC_TX_POWER);
-        if (tempRadioActive) {
-            LOG_RAW("Tmp: %.3f BW%.1f SF%d CR%d [ON]\n\r",
-                tempFrequency, tempBandwidth, tempSpreadingFactor, tempCodingRate);
-        }
-    }
-    // Temporary radio: tempradio <freq> <bw> <sf> <cr>
-    else if (strncmp(cmd, "tempradio ", 10) == 0) {
-        float freq, bw;
-        int sf, cr;
-        if (sscanf(cmd + 10, "%f %f %d %d", &freq, &bw, &sf, &cr) == 4) {
-            // Validate parameters
-            if (freq < 150.0f || freq > 960.0f) {
-                LOG_RAW("Error: freq 150-960 MHz\n\r");
-            } else if (bw < 7.8f || bw > 500.0f) {
-                LOG_RAW("Error: bw 7.8-500 kHz\n\r");
-            } else if (sf < 6 || sf > 12) {
-                LOG_RAW("Error: sf 6-12\n\r");
-            } else if (cr < 5 || cr > 8) {
-                LOG_RAW("Error: cr 5-8\n\r");
-            } else {
-                tempFrequency = freq;
-                tempBandwidth = bw;
-                tempSpreadingFactor = sf;
-                tempCodingRate = cr;
-                tempRadioActive = true;
-                LOG_RAW("Tmp: %.3f BW%.1f SF%d CR%d\n\r", freq, bw, sf, cr);
-                setupRadio();
-                startReceive();
-                calculateTimings();
-                LOG_RAW("OK\n\r");
-            }
-        } else if (strcmp(cmd + 10, "off") == 0) {
-            if (tempRadioActive) {
-                tempRadioActive = false;
-                LOG_RAW("Reverting...\n\r");
-                setupRadio();
-                startReceive();
-                calculateTimings();
-                LOG_RAW("OK\n\r");
-            } else {
-                LOG_RAW("Temp radio not active\n\r");
-            }
-        } else {
-            LOG_RAW("tempradio <freq> <bw> <sf> <cr> | off\n\r");
-        }
-    }
-    else if (strcmp(cmd, "tempradio") == 0) {
-        if (tempRadioActive) {
-            LOG_RAW("Tmp: %.3f BW%.1f SF%d CR%d [ON]\n\r",
-                tempFrequency, tempBandwidth, tempSpreadingFactor, tempCodingRate);
-        } else {
-            LOG_RAW("Tmp radio off\n\r");
-        }
-    }
-    else if (strcmp(cmd, "radiostats") == 0) {
-        const RadioStats& rs = repeaterHelper.getRadioStats();
-        LOG_RAW("Noise:%ddBm RSSI:%d SNR:%d.%ddB\n\r",
-            rs.noiseFloor, rs.lastRssi, rs.lastSnr/4, abs(rs.lastSnr%4)*25);
-        LOG_RAW("Airtime TX:%lus RX:%lus\n\r", rs.txAirTimeSec, rs.rxAirTimeSec);
-    }
-    else if (strcmp(cmd, "packetstats") == 0) {
-        const PacketStats& ps = repeaterHelper.getPacketStats();
-        LOG_RAW("RX:%lu TX:%lu\n\r", ps.numRecvPackets, ps.numSentPackets);
-        LOG_RAW("Flood RX:%lu TX:%lu Direct RX:%lu TX:%lu\n\r",
-            ps.numRecvFlood, ps.numSentFlood, ps.numRecvDirect, ps.numSentDirect);
-    }
-    else if (strcmp(cmd, "health") == 0) {
-        uint8_t cnt = seenNodes.getCount();
-        uint32_t now = millis();
-        uint8_t offline = 0;
-        for (uint8_t i = 0; i < cnt; i++) {
-            const SeenNode* n = seenNodes.getNode(i);
-            if (n && (now - n->lastSeen) > HEALTH_OFFLINE_MS) offline++;
-        }
-        LOG_RAW("Nodes:%d Offline:%d Alert:%s\n\r", cnt, offline,
-            alertEnabled ? "ON" : "OFF");
-        for (uint8_t i = 0; i < cnt; i++) {
-            const SeenNode* n = seenNodes.getNode(i);
-            if (n && n->lastSeen > 0) {
-                uint32_t ago = (now - n->lastSeen) / 1000;
-                LOG_RAW(" %02X %s snr=%d/%ddB %lus%s\n\r", n->hash,
-                    n->name[0] ? n->name : "-",
-                    n->lastSnr/4, n->snrAvg/4, ago,
-                    ago > HEALTH_OFFLINE_MS/1000 ? " OFF" : "");
-            }
-        }
-    }
-    else if (strcmp(cmd, "power") == 0) {
-        const char* modeStr = powerSaveMode == 0 ? "Perf" : powerSaveMode == 1 ? "Bal" : "PwrSave";
-        LOG_RAW("Mode:%s RxBoost:%s Sleep:%s\n\r", modeStr,
-            rxBoostEnabled ? "ON" : "OFF", deepSleepEnabled ? "ON" : "OFF");
-    }
-    else if (strncmp(cmd, "mode ", 5) == 0) {
-        char m = cmd[5];
-        if (m == '0') { powerSaveMode = 0; saveConfig(); LOG_RAW("Mode: Perf\n\r"); }
-        else if (m == '1') { powerSaveMode = 1; saveConfig(); LOG_RAW("Mode: Bal\n\r"); }
-        else if (m == '2') { powerSaveMode = 2; saveConfig(); LOG_RAW("Mode: PwrSave\n\r"); }
+    else if (strncmp(cmd, "time ", 5) == 0) {
+        uint32_t ts = strtoul(cmd + 5, NULL, 10);
+        if (ts > 1577836800) { timeSync.setTime(ts); LOG_RAW("Time set: %lu\n\r", ts); }
+        else LOG_RAW("Invalid timestamp\n\r");
     }
     else if (strcmp(cmd, "acl") == 0) {
         LOG_RAW("Admin:%s Guest:%s Sessions:%d\n\r",
@@ -541,39 +544,63 @@ void processCommand(char* cmd) {
             strlen(sessionManager.getGuestPassword()) > 0 ? sessionManager.getGuestPassword() : "(off)",
             sessionManager.getSessionCount());
     }
-    else if (strcmp(cmd, "repeat") == 0) {
-        LOG_RAW("Repeat:%s Hops:%d\n\r",
-            repeaterHelper.isRepeatEnabled() ? "ON" : "OFF",
-            repeaterHelper.getMaxFloodHops());
-    }
-    else if (strcmp(cmd, "set repeat on") == 0) {
-        repeaterHelper.setRepeatEnabled(true); LOG_RAW("Repeat ON\n\r");
-    }
-    else if (strcmp(cmd, "set repeat off") == 0) {
-        repeaterHelper.setRepeatEnabled(false); LOG_RAW("Repeat OFF\n\r");
-    }
-    else if (strncmp(cmd, "set flood.max ", 14) == 0) {
-        uint8_t hops = atoi(cmd + 14);
-        if (hops >= 1 && hops <= 15) { repeaterHelper.setMaxFloodHops(hops); LOG_RAW("Flood max:%d\n\r", hops); }
-    }
-    else if (strcmp(cmd, "ping") == 0) {
-        sendPing();
-    }
-    else if (strncmp(cmd, "ping ", 5) == 0) {
-        uint8_t h = (uint8_t)strtoul(cmd + 5, NULL, 16);
-        if (h != 0) { sendDirectedPing(h); }
-        else { LOG_RAW("Use: ping <hex>\n\r"); }
-    }
-    else if (strncmp(cmd, "trace ", 6) == 0) {
-        uint8_t h = (uint8_t)strtoul(cmd + 6, NULL, 16);
-        if (h != 0) { sendDirectedTrace(h); }
-        else { LOG_RAW("Use: trace <hex>\n\r"); }
-    }
     else if (strcmp(cmd, "rssi") == 0) {
         LOG_RAW("RSSI:%d SNR:%d.%02ddB\n\r", lastRssi, lastSnr/4, abs(lastSnr%4)*25);
     }
-    else if (strcmp(cmd, "advert local") == 0) {
-        sendAdvert(false);
+    else if (strcmp(cmd, "alert test") == 0) {
+        if (sendAlertAsChatNode("Test alert")) LOG_RAW("Test alert sent\n\r");
+        else LOG_RAW("Alert not set\n\r");
+    }
+    // Temporary radio: tempradio <freq> <bw> <sf> <cr>
+    else if (strncmp(cmd, "tempradio ", 10) == 0) {
+        if (strcmp(cmd + 10, "off") == 0) {
+            if (tempRadioActive) {
+                tempRadioActive = false;
+                setupRadio(); startReceive(); calculateTimings();
+                LOG_RAW("Temp radio off OK\n\r");
+            } else LOG_RAW("Temp radio not active\n\r");
+        } else {
+            // Parse: freq bw sf cr (e.g. "869.618 62.5 8 8")
+            char buf[40];
+            strncpy(buf, cmd + 10, sizeof(buf) - 1); buf[sizeof(buf)-1] = 0;
+            char* p = buf;
+            char* tok[4]; uint8_t ti = 0;
+            while (*p && ti < 4) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                tok[ti++] = p;
+                while (*p && *p != ' ') p++;
+                if (*p) *p++ = 0;
+            }
+            uint32_t freqM, bwT;
+            if (ti == 4 && parseMHz3(tok[0], &freqM) && parseBW1(tok[1], &bwT)) {
+                int sf = atoi(tok[2]), cr = atoi(tok[3]);
+                // freqM = MHz*1000, bwT = kHz*10
+                if (freqM < 150000 || freqM > 960000) LOG_RAW("E:freq\n\r");
+                else if (bwT < 78 || bwT > 5000) LOG_RAW("E:bw\n\r");
+                else if (sf < 6 || sf > 12) LOG_RAW("E:sf\n\r");
+                else if (cr < 5 || cr > 8) LOG_RAW("E:cr\n\r");
+                else {
+                    tempFrequency = freqM / 1000.0f;
+                    tempBandwidth = bwT / 10.0f;
+                    tempSpreadingFactor = sf; tempCodingRate = cr;
+                    tempRadioActive = true;
+                    setupRadio(); startReceive(); calculateTimings();
+                    LOG_RAW("Tmp: %lu.%03lu BW%lu.%lu SF%d CR%d OK\n\r",
+                        freqM/1000, freqM%1000, bwT/10, bwT%10, sf, cr);
+                }
+            } else LOG_RAW("tempradio <freq> <bw> <sf> <cr> | off\n\r");
+        }
+    }
+    else if (strcmp(cmd, "tempradio") == 0) {
+        if (tempRadioActive) {
+            // Convert back to integer display
+            uint32_t fM = (uint32_t)(tempFrequency * 1000);
+            uint32_t bT = (uint32_t)(tempBandwidth * 10);
+            LOG_RAW("Tmp: %lu.%03lu BW%lu.%lu SF%d CR%d [ON]\n\r",
+                fM/1000, fM%1000, bT/10, bT%10, tempSpreadingFactor, tempCodingRate);
+        }
+        else LOG_RAW("Tmp radio off\n\r");
     }
 #ifdef ENABLE_DAILY_REPORT
     else if (strcmp(cmd, "report") == 0) {
@@ -582,17 +609,14 @@ void processCommand(char* cmd) {
             isPubKeySet(reportDestPubKey) ? "set" : "none");
     }
     else if (strcmp(cmd, "report on") == 0) {
-        if (isPubKeySet(reportDestPubKey)) {
-            reportEnabled = true; saveConfig();
-            LOG_RAW("Report ON (%02d:%02d)\n\r", reportHour, reportMinute);
-        } else LOG_RAW("No dest key\n\r");
+        if (isPubKeySet(reportDestPubKey)) { reportEnabled = true; saveConfig(); LOG_RAW("Report ON\n\r"); }
+        else LOG_RAW("No dest key\n\r");
     }
     else if (strcmp(cmd, "report off") == 0) {
         reportEnabled = false; saveConfig(); LOG_RAW("Report OFF\n\r");
     }
     else if (strcmp(cmd, "report clear") == 0) {
-        reportEnabled = false;
-        memset(reportDestPubKey, 0, REPORT_PUBKEY_SIZE);
+        reportEnabled = false; memset(reportDestPubKey, 0, REPORT_PUBKEY_SIZE);
         saveConfig(); LOG_RAW("Report cleared\n\r");
     }
     else if (strcmp(cmd, "report test") == 0) {
@@ -602,13 +626,9 @@ void processCommand(char* cmd) {
         } else LOG_RAW("No dest key\n\r");
     }
     else if (strncmp(cmd, "report dest ", 12) == 0) {
-        const char* arg = cmd + 12;
-        Contact* c = contactMgr.findByName(arg);
-        if (c) {
-            memcpy(reportDestPubKey, c->pubKey, REPORT_PUBKEY_SIZE);
-            saveConfig();
-            LOG_RAW("Dest:%s(%02X)\n\r", c->name, reportDestPubKey[0]);
-        } else LOG_RAW("'%s' not found\n\r", arg);
+        Contact* c = contactMgr.findByName(cmd + 12);
+        if (c) { memcpy(reportDestPubKey, c->pubKey, REPORT_PUBKEY_SIZE); saveConfig(); LOG_RAW("Dest:%s\n\r", c->name); }
+        else LOG_RAW("'%s' not found\n\r", cmd + 12);
     }
     else if (strncmp(cmd, "report time ", 12) == 0) {
         int h, m;
@@ -617,11 +637,8 @@ void processCommand(char* cmd) {
             LOG_RAW("Report time: %02d:%02d\n\r", reportHour, reportMinute);
         } else LOG_RAW("Use: report time HH:MM\n\r");
     }
-#endif // ENABLE_DAILY_REPORT
+#endif
 #ifndef LITE_MODE
-    else if (strcmp(cmd, "contacts") == 0) {
-        contactMgr.printContacts();
-    }
     else if (strncmp(cmd, "msg ", 4) == 0) {
         char* nameStart = cmd + 4;
         char* msgStart = strchr(nameStart, ' ');
@@ -632,27 +649,11 @@ void processCommand(char* cmd) {
         } else LOG_RAW("msg <name> <message>\n\r");
     }
 #endif
-    else if (strcmp(cmd, "reset") == 0) {
-        resetConfig();
-        applyPowerSettings();
-        LOG_RAW("Config reset\n\r");
-    }
-    else if (strcmp(cmd, "save") == 0) {
-        saveConfig();
-        LOG_RAW("Config saved\n\r");
-    }
-    else if (strcmp(cmd, "reboot") == 0) {
-        LOG_RAW("Rebooting...\n\r");
-        delay(100);
-        #ifdef CUBECELL
-        NVIC_SystemReset();
-        #endif
-    }
     else if (strlen(cmd) > 0) {
         LOG_RAW("Unknown: %s\n\r", cmd);
     }
 }
-// End of processCommand - ANSI table version removed to save Flash
+// End of processCommand
 
 void checkSerial() {
     while (Serial.available()) {
@@ -691,308 +692,44 @@ void checkSerial() {
  * @return Length of response, 0 if command not allowed
  */
 uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, bool isAdmin) {
-    uint16_t len = 0;
+    CmdCtx ctx = { response, 0, maxLen };
 
-    // Helper macro to append to response
+    // Try shared dispatcher first
+    if (dispatchSharedCommand(cmd, ctx, isAdmin)) {
+        // Handle reboot for remote
+        if (strcmp(cmd, "reboot") == 0) {
+            pendingReboot = true;
+            rebootTime = millis() + 500;
+        }
+        return ctx.len;
+    }
+
+    // If not admin and command wasn't a read-only shared command
+    if (!isAdmin) {
+        int rc = snprintf(response + ctx.len, maxLen - ctx.len, "Err:admin\n");
+        if (rc > 0 && ctx.len + rc < maxLen) ctx.len += rc;
+        return ctx.len;
+    }
+
     #define RESP_APPEND(...) do { \
-        int _rc = snprintf(response + len, maxLen - len, __VA_ARGS__); \
-        if (_rc > 0 && len + _rc < maxLen) len += _rc; \
+        int _rc = snprintf(response + ctx.len, maxLen - ctx.len, __VA_ARGS__); \
+        if (_rc > 0 && ctx.len + _rc < maxLen) ctx.len += _rc; \
     } while(0)
 
-    // === Read-only commands (guest + admin) ===
-
-    if (strcmp(cmd, "status") == 0) {
-        RESP_APPEND("FW:v%s %s(%02X) Up:%lus T:%s\n", FIRMWARE_VERSION,
-            nodeIdentity.getNodeName(), nodeIdentity.getNodeHash(),
-            millis() / 1000, timeSync.isSynchronized() ? "sync" : "nosync");
-    }
-    else if (strcmp(cmd, "stats") == 0) {
-        RESP_APPEND("RX:%lu TX:%lu FWD:%lu E:%lu ADV:%lu/%lu Q:%d\n",
-            rxCount, txCount, fwdCount, errCount, advTxCount, advRxCount, txQueue.getCount());
-    }
-    else if (strcmp(cmd, "time") == 0) {
-        if (timeSync.isSynchronized()) {
-            RESP_APPEND("T:%lu sync\n", timeSync.getTimestamp());
-        } else {
-            RESP_APPEND("T:nosync\n");
-        }
-    }
-    else if (strcmp(cmd, "telemetry") == 0) {
-        telemetry.update();
-        RESP_APPEND("Batt:%dmV Up:%lus\n", telemetry.getBatteryMv(), millis() / 1000);
-    }
-    else if (strcmp(cmd, "nodes") == 0) {
-        uint8_t count = seenNodes.getCount();
-        RESP_APPEND("Nodes:%d\n", count);
-        for (uint8_t i = 0; i < count && len < maxLen - 48; i++) {
-            const SeenNode* n = seenNodes.getNode(i);
-            if (n && n->lastSeen > 0) {
-                uint32_t ago = (millis() - n->lastSeen) / 1000;
-                if (timeSync.isSynchronized()) {
-                    uint32_t ts = timeSync.getTimestamp() - ago;
-                    TimeSync::DateTime dt;
-                    TimeSync::timestampToDateTime(ts, dt);
-                    RESP_APPEND("%02X %s %ddBm %d.%ddB %02d/%02d/%02d %02d:%02d\n", n->hash, n->name[0]?n->name:"-", n->lastRssi, n->lastSnr/4, abs(n->lastSnr%4)*25, dt.day, dt.month, dt.year % 100, dt.hour, dt.minute);
-                } else {
-                    RESP_APPEND("%02X %s %ddBm %d.%ddB %lus\n", n->hash, n->name[0]?n->name:"-", n->lastRssi, n->lastSnr/4, abs(n->lastSnr%4)*25, ago);
-                }
-            }
-        }
-    }
-    else if (strcmp(cmd, "neighbours") == 0 || strcmp(cmd, "neighbors") == 0) {
-        NeighbourTracker& nb = repeaterHelper.getNeighbours();
-        uint8_t count = nb.getCount();
-        RESP_APPEND("Nbr:%d\n", count);
-    }
-    else if (strcmp(cmd, "repeat") == 0) {
-        RESP_APPEND("Rpt:%s hops:%d\n", repeaterHelper.isRepeatEnabled() ? "on" : "off",
-            repeaterHelper.getMaxFloodHops());
-    }
-    else if (strcmp(cmd, "identity") == 0) {
-        RESP_APPEND("%s %02X\n", nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
-        if (nodeIdentity.hasLocation()) {
-            int32_t lat = nodeIdentity.getLatitude();
-            int32_t lon = nodeIdentity.getLongitude();
-            RESP_APPEND("Loc: %ld.%06ld,%ld.%06ld\n",
-                lat/1000000, abs(lat%1000000), lon/1000000, abs(lon%1000000));
-        }
-    }
-    else if (strcmp(cmd, "location") == 0) {
-        if (nodeIdentity.hasLocation()) {
-            int32_t lat = nodeIdentity.getLatitude();
-            int32_t lon = nodeIdentity.getLongitude();
-            RESP_APPEND("%ld.%06ld,%ld.%06ld\n",
-                lat/1000000, abs(lat%1000000), lon/1000000, abs(lon%1000000));
-        } else {
-            RESP_APPEND("No loc\n");
-        }
-    }
-    else if (strcmp(cmd, "advert interval") == 0) {
-        RESP_APPEND("Int:%lus next:%lus\n", advertGen.getInterval() / 1000, advertGen.getTimeUntilNext());
-    }
-    else if (strcmp(cmd, "radiostats") == 0) {
-        const RadioStats& rs = repeaterHelper.getRadioStats();
-        RESP_APPEND("Noise:%ddBm RSSI:%d SNR:%d.%ddB\n",
-            rs.noiseFloor, rs.lastRssi, rs.lastSnr/4, abs(rs.lastSnr%4)*25);
-        RESP_APPEND("Airtime TX:%lus RX:%lus\n", rs.txAirTimeSec, rs.rxAirTimeSec);
-    }
-    else if (strcmp(cmd, "packetstats") == 0) {
-        const PacketStats& ps = repeaterHelper.getPacketStats();
-        RESP_APPEND("RX:%lu TX:%lu\n", ps.numRecvPackets, ps.numSentPackets);
-        RESP_APPEND("FL RX:%lu TX:%lu DR RX:%lu TX:%lu\n",
-            ps.numRecvFlood, ps.numSentFlood, ps.numRecvDirect, ps.numSentDirect);
-    }
-    else if (strcmp(cmd, "radio") == 0) {
-        RESP_APPEND("%.3f BW%.1f SF%d CR%d\n",
-            (float)MC_FREQUENCY, (float)MC_BANDWIDTH, MC_SPREADING, MC_CODING_RATE);
-    }
-    else if (strcmp(cmd, "lifetime") == 0) {
-        const PersistentStats* ps = getPersistentStats();
-        RESP_APPEND("Boots:%u RX:%lu TX:%lu FWD:%lu Nodes:%lu\n",
-            ps->bootCount, ps->totalRxPackets, ps->totalTxPackets,
-            ps->totalFwdPackets, ps->totalUniqueNodes);
-    }
-    else if (strcmp(cmd, "health") == 0) {
-        uint8_t cnt = seenNodes.getCount();
-        uint8_t offline = 0;
-        uint32_t now = millis();
-        for (uint8_t i = 0; i < cnt; i++) {
-            const SeenNode* n = seenNodes.getNode(i);
-            if (n && (now - n->lastSeen) > HEALTH_OFFLINE_MS) offline++;
-        }
-        RESP_APPEND("Nodes:%d Off:%d Alert:%s\n", cnt, offline,
-            alertEnabled ? "on" : "off");
-        for (uint8_t i = 0; i < cnt && len < maxLen - 32; i++) {
-            const SeenNode* n = seenNodes.getNode(i);
-            if (n && n->lastSeen > 0) {
-                uint32_t ago = (now - n->lastSeen) / 1000;
-                RESP_APPEND("%02X %d/%ddB %lus%s\n", n->hash,
-                    n->lastSnr/4, n->snrAvg/4, ago,
-                    ago > HEALTH_OFFLINE_MS/1000 ? " OFF" : "");
-            }
-        }
-    }
-
-    // === Admin-only commands ===
-
-    else if (!isAdmin) {
-        RESP_APPEND("Err:admin\n");
-        return len;
-    }
-
-    // From here, all commands require admin
-
-    else if (strcmp(cmd, "set repeat on") == 0) {
-        repeaterHelper.setRepeatEnabled(true);
-        RESP_APPEND("rpt:on\n");
-    }
-    else if (strcmp(cmd, "set repeat off") == 0) {
-        repeaterHelper.setRepeatEnabled(false);
-        RESP_APPEND("rpt:off\n");
-    }
-    else if (strncmp(cmd, "set flood.max ", 14) == 0) {
-        uint8_t hops = atoi(cmd + 14);
-        if (hops >= 1 && hops <= 15) {
-            repeaterHelper.setMaxFloodHops(hops);
-            RESP_APPEND("hops:%d\n", hops);
-        } else RESP_APPEND("E:1-15\n");
-    }
-    else if (strncmp(cmd, "set password ", 13) == 0) {
+    // Remote-only admin commands
+    if (strncmp(cmd, "set password ", 13) == 0) {
         const char* pwd = cmd + 13;
         if (strlen(pwd) > 0 && strlen(pwd) <= 15) {
-            sessionManager.setAdminPassword(pwd);
-            saveConfig();
+            sessionManager.setAdminPassword(pwd); saveConfig();
             RESP_APPEND("pwd set\n");
         } else RESP_APPEND("E:1-15\n");
     }
     else if (strncmp(cmd, "set guest ", 10) == 0) {
         const char* pwd = cmd + 10;
         if (strlen(pwd) <= 15) {
-            sessionManager.setGuestPassword(pwd);
-            saveConfig();
+            sessionManager.setGuestPassword(pwd); saveConfig();
             RESP_APPEND("guest set\n");
         } else RESP_APPEND("E:0-15\n");
-    }
-    else if (strncmp(cmd, "name ", 5) == 0) {
-        const char* newName = cmd + 5;
-        if (strlen(newName) > 0 && strlen(newName) < MC_NODE_NAME_MAX) {
-            nodeIdentity.setNodeName(newName);
-            RESP_APPEND("name=%s\n", newName);
-        } else RESP_APPEND("E:1-15\n");
-    }
-    else if (strcmp(cmd, "location clear") == 0) {
-        nodeIdentity.clearLocation();
-        RESP_APPEND("loc clr\n");
-    }
-    else if (strncmp(cmd, "location ", 9) == 0) {
-        float lat, lon;
-        if (sscanf(cmd + 9, "%f %f", &lat, &lon) == 2 &&
-            lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
-            nodeIdentity.setLocation(lat, lon);
-            RESP_APPEND("%.6f,%.6f\n", lat, lon);
-        } else RESP_APPEND("E:loc\n");
-    }
-    else if (strncmp(cmd, "advert interval ", 16) == 0) {
-        uint32_t interval = strtoul(cmd + 16, NULL, 10);
-        if (interval >= 60 && interval <= 86400) {
-            advertGen.setInterval(interval * 1000);
-            RESP_APPEND("int:%lus\n", interval);
-        } else RESP_APPEND("E:60-86400\n");
-    }
-    else if (strcmp(cmd, "advert") == 0) {
-        sendAdvert(true);
-        RESP_APPEND("adv sent\n");
-    }
-    else if (strcmp(cmd, "advert local") == 0) {
-        sendAdvert(false);
-        RESP_APPEND("adv local\n");
-    }
-    else if (strcmp(cmd, "ping") == 0) {
-        sendPing();
-        RESP_APPEND("ping sent\n");
-    }
-    else if (strncmp(cmd, "ping ", 5) == 0) {
-        uint8_t h = (uint8_t)strtoul(cmd + 5, NULL, 16);
-        if (h != 0) { sendDirectedPing(h); RESP_APPEND("ping->%02X\n", h); }
-        else { RESP_APPEND("E:hex\n"); }
-    }
-    else if (strncmp(cmd, "trace ", 6) == 0) {
-        uint8_t h = (uint8_t)strtoul(cmd + 6, NULL, 16);
-        if (h != 0) { sendDirectedTrace(h); RESP_APPEND("trace->%02X\n", h); }
-        else { RESP_APPEND("E:hex\n"); }
-    }
-    else if (strcmp(cmd, "rxboost on") == 0) {
-        rxBoostEnabled = true;
-        applyPowerSettings(); saveConfig();
-        RESP_APPEND("RxB:ON\n");
-    }
-    else if (strcmp(cmd, "rxboost off") == 0) {
-        rxBoostEnabled = false;
-        applyPowerSettings(); saveConfig();
-        RESP_APPEND("RxB:OFF\n");
-    }
-    else if (strcmp(cmd, "rxboost") == 0) {
-        RESP_APPEND("RxB:%s\n", rxBoostEnabled ? "ON" : "OFF");
-    }
-    else if (strcmp(cmd, "sleep on") == 0) {
-        deepSleepEnabled = true; saveConfig();
-        RESP_APPEND("sleep:on\n");
-    }
-    else if (strcmp(cmd, "sleep off") == 0) {
-        deepSleepEnabled = false; saveConfig();
-        RESP_APPEND("sleep:off\n");
-    }
-    else if (strcmp(cmd, "sleep") == 0) {
-        RESP_APPEND("sleep:%s\n", deepSleepEnabled ? "on" : "off");
-    }
-    else if (strcmp(cmd, "ratelimit on") == 0) {
-        repeaterHelper.setRateLimitEnabled(true);
-        RESP_APPEND("RL:on\n");
-    }
-    else if (strcmp(cmd, "ratelimit off") == 0) {
-        repeaterHelper.setRateLimitEnabled(false);
-        RESP_APPEND("RL:off\n");
-    }
-    else if (strcmp(cmd, "ratelimit reset") == 0) {
-        repeaterHelper.resetRateLimitStats();
-        RESP_APPEND("RL reset\n");
-    }
-    else if (strcmp(cmd, "ratelimit") == 0) {
-        RESP_APPEND("RL:%s L:%lu R:%lu F:%lu\n",
-            repeaterHelper.isRateLimitEnabled() ? "on" : "off",
-            repeaterHelper.getLoginLimiter().getTotalBlocked(),
-            repeaterHelper.getRequestLimiter().getTotalBlocked(),
-            repeaterHelper.getForwardLimiter().getTotalBlocked());
-    }
-    else if (strcmp(cmd, "alert on") == 0) {
-        if (isPubKeySet(alertDestPubKey)) {
-            alertEnabled = true; saveConfig();
-            RESP_APPEND("alert:on\n");
-        } else RESP_APPEND("E:no dest\n");
-    }
-    else if (strcmp(cmd, "alert off") == 0) {
-        alertEnabled = false; saveConfig();
-        RESP_APPEND("alert:off\n");
-    }
-    else if (strcmp(cmd, "alert clear") == 0) {
-        memset(alertDestPubKey, 0, REPORT_PUBKEY_SIZE);
-        alertEnabled = false; saveConfig();
-        RESP_APPEND("alert clr\n");
-    }
-    else if (strncmp(cmd, "alert dest ", 11) == 0) {
-        Contact* c = contactMgr.findByName(cmd + 11);
-        if (c) {
-            memcpy(alertDestPubKey, c->pubKey, REPORT_PUBKEY_SIZE);
-            saveConfig();
-            RESP_APPEND("alert->%s\n", c->name);
-        } else RESP_APPEND("E:not found\n");
-    }
-    else if (strcmp(cmd, "alert") == 0) {
-        RESP_APPEND("alert:%s dest:%s\n",
-            alertEnabled ? "on" : "off",
-            isPubKeySet(alertDestPubKey) ? "set" : "none");
-    }
-    else if (strncmp(cmd, "mode ", 5) == 0) {
-        char m = cmd[5];
-        if (m >= '0' && m <= '2') {
-            powerSaveMode = m - '0'; saveConfig();
-            RESP_APPEND("mode:%c\n", m);
-        } else RESP_APPEND("E:0-2\n");
-    }
-    else if (strcmp(cmd, "power") == 0) {
-        RESP_APPEND("M:%d RxB:%s DS:%s\n", powerSaveMode,
-            rxBoostEnabled ? "on" : "off", deepSleepEnabled ? "on" : "off");
-    }
-    else if (strcmp(cmd, "save") == 0) {
-        saveConfig();
-        RESP_APPEND("saved\n");
-    }
-    else if (strcmp(cmd, "reset") == 0) {
-        resetConfig();
-        RESP_APPEND("reset\n");
-    }
-    else if (strcmp(cmd, "reboot") == 0) {
-        RESP_APPEND("reboot\n");
     }
 #ifdef ENABLE_DAILY_REPORT
     else if (strcmp(cmd, "report") == 0) {
@@ -1000,34 +737,27 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
             reportEnabled ? "ON" : "OFF", reportHour, reportMinute,
             reportDestPubKey[0], isPubKeySet(reportDestPubKey) ? "" : "(no)");
     }
-    else if (strncmp(cmd, "report dest ", 12) == 0 && isAdmin) {
-        const char* arg = cmd + 12;
-        Contact* c = contactMgr.findByName(arg);
-        if (c) {
-            memcpy(reportDestPubKey, c->pubKey, REPORT_PUBKEY_SIZE);
-            saveConfig();
-            RESP_APPEND("Dest:%s(%02X)\n", c->name, reportDestPubKey[0]);
-        } else RESP_APPEND("E:not found\n");
+    else if (strncmp(cmd, "report dest ", 12) == 0) {
+        Contact* c = contactMgr.findByName(cmd + 12);
+        if (c) { memcpy(reportDestPubKey, c->pubKey, REPORT_PUBKEY_SIZE); saveConfig(); RESP_APPEND("Dest:%s\n", c->name); }
+        else RESP_APPEND("E:not found\n");
     }
-    else if (strcmp(cmd, "report on") == 0 && isAdmin) {
-        if (isPubKeySet(reportDestPubKey)) {
-            reportEnabled = true; saveConfig();
-            RESP_APPEND("Rpt ON %02d:%02d\n", reportHour, reportMinute);
-        } else RESP_APPEND("E:no dest\n");
+    else if (strcmp(cmd, "report on") == 0) {
+        if (isPubKeySet(reportDestPubKey)) { reportEnabled = true; saveConfig(); RESP_APPEND("Rpt ON\n"); }
+        else RESP_APPEND("E:no dest\n");
     }
-    else if (strcmp(cmd, "report off") == 0 && isAdmin) {
-        reportEnabled = false; saveConfig();
-        RESP_APPEND("Rpt OFF\n");
+    else if (strcmp(cmd, "report off") == 0) {
+        reportEnabled = false; saveConfig(); RESP_APPEND("Rpt OFF\n");
     }
-    else if (strcmp(cmd, "report test") == 0 && isAdmin) {
+    else if (strcmp(cmd, "report test") == 0) {
         extern uint16_t generateReportContent(char*, uint16_t);
-        len = generateReportContent(response, maxLen - 1);
+        ctx.len = generateReportContent(response, maxLen - 1);
     }
-    else if (strcmp(cmd, "report nodes") == 0 && isAdmin) {
+    else if (strcmp(cmd, "report nodes") == 0) {
         extern uint16_t generateNodesReport(char*, uint16_t);
-        len = generateNodesReport(response, maxLen - 1);
+        ctx.len = generateNodesReport(response, maxLen - 1);
     }
-    else if (strncmp(cmd, "report time ", 12) == 0 && isAdmin) {
+    else if (strncmp(cmd, "report time ", 12) == 0) {
         int h, m;
         if (sscanf(cmd + 12, "%d:%d", &h, &m) == 2 && h >= 0 && h <= 23 && m >= 0 && m <= 59) {
             reportHour = h; reportMinute = m; saveConfig();
@@ -1045,7 +775,7 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     }
 
     #undef RESP_APPEND
-    return len;
+    return ctx.len;
 }
 
 //=============================================================================
@@ -1268,7 +998,8 @@ void setupRadio() {
     // Apply power settings
     applyPowerSettings();
 
-    LOG(TAG_RADIO " %.3f BW%.1f SF%d CR%d\n\r", freq, bw, sf, cr);
+    { uint32_t fM = (uint32_t)(freq * 1000); uint32_t bT = (uint32_t)(bw * 10);
+    LOG(TAG_RADIO " %lu.%03lu BW%lu.%lu SF%d CR%d\n\r", fM/1000, fM%1000, bT/10, bT%10, sf, cr); }
 }
 
 void startReceive() {

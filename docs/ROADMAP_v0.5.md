@@ -226,12 +226,15 @@ Configurazione completa del repeater dall'app MeshCore senza cavo seriale, trami
 |---------|-------------|--------|------|
 | Baseline v0.4.0 | 128,728 B | 2,344 B | |
 | Post Fase 0 | 128,280 B | 2,792 B | -448 B recuperati |
-| Post Fase 1 (OTA) | 129,304 B | **1,768 B** | +1,024 B per 15 nuovi comandi |
+| Post Fase 1 (OTA) | 129,304 B | 1,768 B | +1,024 B per 15 nuovi comandi |
+| Post Fase 2 (Health) | 130,360 B | 712 B | +1,120 B health monitor |
+| Post Fase 2.5 (Opt) | 117,444 B | **13,628 B** | -12,916 B ottimizzazione |
 
 | Feature | Flash stimata | Flash reale | RAM | EEPROM |
 |---------|---------------|-------------|-----|--------|
 | OTA Config completa | ~500B | **1,024B** | 0B | 0B |
 | Health Monitor | ~800B | **1,120B** | 64B | 0B |
+| CLI Merge + Float opt | ~4,000B | **-12,916B** | -368B | 0B |
 | Store-and-Forward | ~1,500B | TBD | ~100B | ~168B |
 
 ---
@@ -288,18 +291,46 @@ Questo meccanismo e' usato sia da `healthCheck()` che da `alert test`.
 **Costo reale**: 1,120 B Flash (+184B per chat node trick), 64 B RAM, 0 EEPROM
 **Stato post-Fase 2**: Flash 130,360/131,072 (99.5%) - **712 B liberi**
 
-### Fase 3: Store-and-Forward Mailbox (v0.5.0) - Sforzo ALTO
+## Fase 2.5: Ottimizzazione codice (COMPLETATA)
+
+### Merge CLI handler unificato
+- Creata `CmdCtx` struct per output unificato (serial/buffer)
+- `dispatchSharedCommand()` contiene ~40 comandi condivisi (prima duplicati)
+- `processCommand()` e `processRemoteCommand()` diventati thin wrapper
+- Comandi serial-only: help, newid, nodetype, passwd, tempradio, test, contacts, msg
+- Comandi remote-only: set password, set guest, report (paginato)
+
+**Risparmio merge CLI**: -3,164 B Flash
+
+### Eliminazione float da parsing comandi
+- `atof()` sostituito con `parseFixed6()` (parsing intero "45.123" -> 45123000)
+- `sscanf(%f)` in tempradio sostituito con `parseMHz3()`/`parseBW1()`
+- `printf("%.3f")` sostituiti con format intero `%lu.%03lu`
+- Aggiunto `setLocationInt(int32_t, int32_t)` a IdentityManager
+- Eliminati dal linker: `_strtod_l` (3,144B), `atof`, `sscanf`, `__ssvfscanf_r`
+
+**Risparmio float elimination**: -9,752 B Flash, -368 B RAM
+
+| Azione | Flash | RAM | Note |
+|--------|-------|-----|------|
+| Merge CLI handlers | -3,164 B | 0 B | dispatchSharedCommand unificato |
+| Float -> integer parsing | -9,752 B | -368 B | strtod_l, scanf_float eliminati |
+| **Totale Fase 2.5** | **-12,916 B** | **-368 B** | |
+
+**Stato post-Fase 2.5**: Flash 117,444/131,072 (89.6%) - **13,628 B liberi**
+
+### Fase 3: Store-and-Forward Mailbox (v0.5.0)
 1. Struttura `MailboxEntry` in EEPROM (offset 340, 2 slot)
 2. Hook in `processReceivedPacket`: se dest offline, salva
 3. Hook in ADVERT RX / pacchetto RX: se mittente torna, consegna
 4. Comandi: `mailbox` (stato), `mailbox clear`
 5. TTL 24h, auto-cleanup
 6. ~1,500B Flash, 100B RAM, 168B EEPROM
+7. **Budget: 13,628 B liberi - ampio margine**
 
-### Ordine consigliato: Fase 0 -> 1 -> 2 -> 3
+### Ordine: Fase 0 -> 1 -> 2 -> 2.5 -> 3
 - Ogni fase e' indipendente e rilasciabile
-- Si misura Flash reale dopo ogni fase prima di procedere
-- Se lo spazio finisce, Fase 3 puo' essere esclusa con #ifdef
+- Fase 2.5 ha liberato spazio massiccio, Fase 3 ora fattibile senza compromessi
 
 ---
 
