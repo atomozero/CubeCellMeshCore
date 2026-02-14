@@ -235,14 +235,34 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
             const SeenNode* n = seenNodes.getNode(i);
             if (n && (now - n->lastSeen) > HEALTH_OFFLINE_MS) offline++;
         }
-        CP("Nodes:%d Off:%d Alert:%s\n", cnt, offline, alertEnabled ? "on" : "off");
+        // Line 1: System vitals
+        telemetry.update();
+        CP("Up:%lus Bat:%dmV(%d%%) T:%s\n", now / 1000,
+            telemetry.getBatteryMv(), telemetry.getBatteryPercent(),
+            timeSync.isSynchronized() ? "sync" : "no");
+        // Line 2: Network summary
+        CP("N:%d On:%d Off:%d Alrt:%s\n", cnt, cnt - offline, offline,
+            alertEnabled ? "on" : "off");
+        // Line 3: Subsystems
+        CP("Mbox:%d/%d RL:%lu/%lu/%lu E:%lu\n",
+            mailbox.getCount(), mailbox.getTotalSlots(),
+            repeaterHelper.getLoginLimiter().getTotalBlocked(),
+            repeaterHelper.getRequestLimiter().getTotalBlocked(),
+            repeaterHelper.getForwardLimiter().getTotalBlocked(),
+            errCount);
+        // Line 4+: Only problematic nodes (offline or SNR degraded)
         for (uint8_t i = 0; i < cnt; i++) {
-            if (ctx.buf && ctx.len >= ctx.maxLen - 32) break;
+            if (ctx.buf && ctx.len >= ctx.maxLen - 40) break;
             const SeenNode* n = seenNodes.getNode(i);
-            if (n && n->lastSeen > 0) {
-                uint32_t ago = (now - n->lastSeen) / 1000;
-                CP("%02X %d/%ddB %lus%s\n", n->hash, n->lastSnr/4, n->snrAvg/4, ago,
-                    ago > HEALTH_OFFLINE_MS/1000 ? " OFF" : "");
+            if (!n) continue;
+            bool isOff = (now - n->lastSeen) > HEALTH_OFFLINE_MS;
+            int8_t snrDrop = n->snrAvg - n->lastSnr;  // positive = degraded
+            if (isOff) {
+                uint32_t offMin = (now - n->lastSeen) / 60000;
+                CP(" %02X %s OFF %lum\n", n->hash, n->name[0] ? n->name : "-", offMin);
+            } else if (snrDrop >= (int8_t)(HEALTH_SNR_DROP_THRESH)) {
+                CP(" %02X %s snr%+ddB\n", n->hash, n->name[0] ? n->name : "-",
+                    (n->lastSnr - n->snrAvg) / 4);
             }
         }
     }
@@ -1659,32 +1679,45 @@ uint32_t getPacketId(MCPacket* pkt) {
 }
 
 bool shouldForward(MCPacket* pkt) {
-    // Only forward flood packets
-    if (!pkt->header.isFlood()) {
+    bool isFlood = pkt->header.isFlood();
+    bool isDirect = pkt->header.isDirect();
+
+    if (!isFlood && !isDirect) {
         return false;
     }
 
+    // DIRECT routing: check if we are the next hop (path[0] == our hash)
+    if (isDirect) {
+        if (pkt->pathLen == 0) return false;
+        if (pkt->path[0] != nodeIdentity.getNodeHash()) return false;
+    }
+
     // Don't forward packets specifically addressed to us
-    // ANON_REQ, REQUEST, RESPONSE all have dest_hash at payload[0]
     uint8_t payloadType = pkt->header.getPayloadType();
     if (payloadType == MC_PAYLOAD_ANON_REQ ||
         payloadType == MC_PAYLOAD_REQUEST ||
         payloadType == MC_PAYLOAD_RESPONSE) {
         if (pkt->payloadLen > 0 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
-            // Addressed to us - don't forward
             return false;
         }
     }
 
-    // Check packet ID cache
+    // Check packet ID cache (dedup)
     uint32_t id = getPacketId(pkt);
     if (!packetCache.addIfNew(id)) {
         return false;
     }
 
-    // Check path length (max 64 hops)
-    if (pkt->pathLen >= MC_MAX_PATH_SIZE - 1) {
-        return false;
+    // FLOOD: check path length and loop prevention
+    if (isFlood) {
+        if (pkt->pathLen >= MC_MAX_PATH_SIZE - 1) {
+            return false;
+        }
+        // Loop prevention: don't forward if we're already in the path
+        uint8_t myHash = nodeIdentity.getNodeHash();
+        for (uint8_t i = 0; i < pkt->pathLen; i++) {
+            if (pkt->path[i] == myHash) return false;
+        }
     }
 
     return true;
@@ -2591,10 +2624,17 @@ void processReceivedPacket(MCPacket* pkt) {
             statsRecordRateLimited();  // Persistent stats
             LOG(TAG_FWD " Rate lim\n\r");
         } else {
-            // Add our node hash to path (simplified: just add a byte)
-            uint8_t myHash = (nodeId >> 24) ^ (nodeId >> 16) ^
-                             (nodeId >> 8) ^ nodeId;
-            pkt->path[pkt->pathLen++] = myHash;
+            if (pkt->header.isDirect()) {
+                // DIRECT routing: remove ourselves from path[0] (peel)
+                pkt->pathLen--;
+                for (uint8_t i = 0; i < pkt->pathLen; i++) {
+                    pkt->path[i] = pkt->path[i + 1];
+                }
+                LOG(TAG_FWD " Direct p=%d\n\r", pkt->pathLen);
+            } else {
+                // FLOOD routing: add our hash to path
+                pkt->path[pkt->pathLen++] = nodeIdentity.getNodeHash();
+            }
 
             // Add to TX queue
             txQueue.add(pkt);

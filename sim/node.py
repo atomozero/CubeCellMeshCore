@@ -318,15 +318,31 @@ class SimRepeater(SimNode):
                 return
 
             fwd_pkt = pkt.copy()
-            fwd_pkt.path.append(self.identity.hash)
+            if fwd_pkt.is_direct():
+                # DIRECT: remove ourselves from path[0] (peel)
+                fwd_pkt.path = fwd_pkt.path[1:]
+                self._log(f"{TAG_FWD} Direct p={fwd_pkt.path_len}")
+            else:
+                # FLOOD: add our hash to path
+                fwd_pkt.path.append(self.identity.hash)
             self.tx_queue.add(fwd_pkt)
             self.stats.fwd_count += 1
             self._log(f"{TAG_FWD} Q p={fwd_pkt.path_len}")
 
     def _should_forward(self, pkt: MCPacket) -> bool:
-        """Port of shouldForward()."""
-        if not pkt.is_flood():
+        """Port of shouldForward(). Supports FLOOD and DIRECT routing."""
+        is_flood = pkt.is_flood()
+        is_direct = pkt.is_direct()
+
+        if not is_flood and not is_direct:
             return False
+
+        # DIRECT routing: check if we are the next hop (path[0] == our hash)
+        if is_direct:
+            if pkt.path_len == 0:
+                return False
+            if pkt.path[0] != self.identity.hash:
+                return False
 
         # Don't forward packets addressed to us
         pt = pkt.payload_type
@@ -339,13 +355,12 @@ class SimRepeater(SimNode):
         if not self.packet_cache.add_if_new(pkt_id):
             return False
 
-        # Check path: our hash must NOT be in path (loop prevention)
-        if self.identity.hash in pkt.path:
-            return False
-
-        # Check path length
-        if pkt.path_len >= MC_MAX_PATH_SIZE - 1:
-            return False
+        # FLOOD: loop prevention and path length check
+        if is_flood:
+            if self.identity.hash in pkt.path:
+                return False
+            if pkt.path_len >= MC_MAX_PATH_SIZE - 1:
+                return False
 
         return True
 
