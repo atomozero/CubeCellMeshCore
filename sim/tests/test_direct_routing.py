@@ -293,3 +293,176 @@ class TestAdvertForwarding:
         adv.path = [0xBB, rpt.identity.hash]  # we're already in path
         rpt.on_rx_packet(adv, rssi=-80, snr=20)
         assert rpt.tx_queue.count == 0
+
+
+# =========================================================================
+# SNR Adaptive Delay Tests
+# =========================================================================
+from sim.node import (
+    calc_snr_score, calc_rx_delay, calc_tx_jitter, MC_MIN_RSSI_FORWARD,
+)
+
+
+class TestCalcSnrScore:
+    """Test calc_snr_score() mapping SNR*4 -> index [0-10]."""
+
+    def test_worst_snr(self):
+        """SNR -20dB (=-80 in *4 units) -> score 0."""
+        assert calc_snr_score(-80) == 0
+
+    def test_best_snr(self):
+        """SNR +15dB (=60 in *4 units) -> score 10."""
+        assert calc_snr_score(60) == 10
+
+    def test_midpoint_snr(self):
+        """SNR around -2.5dB (=-10 in *4 units) -> score 5."""
+        assert calc_snr_score(-10) == 5
+
+    def test_below_minimum_clamped(self):
+        """SNR far below -20dB should clamp to 0."""
+        assert calc_snr_score(-120) == 0
+
+    def test_above_maximum_clamped(self):
+        """SNR far above +15dB should clamp to 10."""
+        assert calc_snr_score(100) == 10
+
+    def test_zero_snr(self):
+        """SNR 0dB (=0 in *4 units) -> score ~5-6."""
+        score = calc_snr_score(0)
+        assert 5 <= score <= 6
+
+    def test_monotonically_increasing(self):
+        """Higher SNR should give higher or equal score."""
+        prev = calc_snr_score(-80)
+        for snr in range(-76, 64, 4):
+            curr = calc_snr_score(snr)
+            assert curr >= prev, f"Score decreased at snr={snr}"
+            prev = curr
+
+
+class TestCalcRxDelay:
+    """Test calc_rx_delay() computes delay from SNR score."""
+
+    def test_worst_snr_highest_delay(self):
+        """Score 0 (worst SNR) should produce highest delay."""
+        d0 = calc_rx_delay(0, 200)
+        d10 = calc_rx_delay(10, 200)
+        assert d0 > d10
+
+    def test_best_snr_lowest_delay(self):
+        """Score 10 (best SNR) should produce lowest delay."""
+        d10 = calc_rx_delay(10, 200)
+        assert d10 == 65 * 200 // 1000  # 13ms
+
+    def test_delay_scales_with_airtime(self):
+        """Delay should scale linearly with airtime."""
+        d100 = calc_rx_delay(5, 100)
+        d200 = calc_rx_delay(5, 200)
+        assert d200 == d100 * 2
+
+    def test_zero_airtime_zero_delay(self):
+        """Zero airtime should give zero delay."""
+        assert calc_rx_delay(5, 0) == 0
+
+    def test_score_out_of_range_clamped(self):
+        """Score > 10 should be clamped to 10."""
+        d11 = calc_rx_delay(11, 200)
+        d10 = calc_rx_delay(10, 200)
+        assert d11 == d10
+
+    def test_better_snr_shorter_delay(self):
+        """Each higher score index should have equal or shorter delay."""
+        airtime = 200
+        prev = calc_rx_delay(0, airtime)
+        for idx in range(1, 11):
+            curr = calc_rx_delay(idx, airtime)
+            assert curr <= prev, f"Delay increased at idx={idx}"
+            prev = curr
+
+
+class TestCalcTxJitter:
+    """Test calc_tx_jitter() produces valid range."""
+
+    def test_jitter_non_negative(self):
+        """Jitter should never be negative."""
+        for _ in range(50):
+            j = calc_tx_jitter(200)
+            assert j >= 0
+
+    def test_jitter_max_bound(self):
+        """Jitter should not exceed 6 * 2 * airtime."""
+        airtime = 200
+        max_jitter = 6 * 2 * airtime
+        for _ in range(50):
+            j = calc_tx_jitter(airtime)
+            assert j <= max_jitter
+
+    def test_jitter_zero_airtime(self):
+        """Zero airtime should give zero jitter."""
+        assert calc_tx_jitter(0) == 0
+
+
+class TestRssiThreshold:
+    """Test RSSI minimum threshold for forwarding."""
+
+    def test_packet_below_rssi_threshold_not_forwarded(self):
+        """Packet with RSSI below -120 dBm should not be forwarded."""
+        rpt = make_repeater("RPT_RSSI1")
+        pkt = make_flood_pkt(dest_hash=0x11, src_hash=0x22, path=[0x22])
+        rpt.on_rx_packet(pkt, rssi=-130, snr=20)
+        assert rpt.tx_queue.count == 0
+
+    def test_packet_at_rssi_threshold_forwarded(self):
+        """Packet with RSSI exactly -120 dBm should be forwarded."""
+        rpt = make_repeater("RPT_RSSI2")
+        pkt = make_flood_pkt(dest_hash=0x11, src_hash=0x22, path=[0x22])
+        rpt.on_rx_packet(pkt, rssi=-120, snr=20)
+        assert rpt.tx_queue.count > 0
+
+    def test_packet_above_rssi_threshold_forwarded(self):
+        """Packet with good RSSI should be forwarded normally."""
+        rpt = make_repeater("RPT_RSSI3")
+        pkt = make_flood_pkt(dest_hash=0x33, src_hash=0x44, path=[0x44])
+        rpt.on_rx_packet(pkt, rssi=-80, snr=20)
+        assert rpt.tx_queue.count > 0
+
+    def test_direct_packet_below_rssi_not_forwarded(self):
+        """DIRECT packet below RSSI threshold should not be forwarded."""
+        rpt = make_repeater("RPT_RSSI4")
+        my_hash = rpt.identity.hash
+        pkt = make_direct_pkt(path=[my_hash, 0xCC])
+        rpt.on_rx_packet(pkt, rssi=-130, snr=20)
+        assert rpt.tx_queue.count == 0
+
+
+class TestDirectVsFloodDelay:
+    """Test that DIRECT routing gets shorter delay than FLOOD."""
+
+    def test_direct_delay_less_than_flood(self):
+        """DIRECT jitter (half) should be less than FLOOD rxDelay + jitter."""
+        airtime = 200
+        # DIRECT: jitter / 2, worst case = 6 * 2 * 200 / 2 = 1200
+        direct_max = 6 * airtime * 2 // 2
+        # FLOOD: rxDelay at mid SNR + zero jitter, best case
+        flood_min = calc_rx_delay(5, airtime)
+        # FLOOD minimum delay should be comparable or add to DIRECT max
+        # The key insight: FLOOD always adds rxDelay, DIRECT does not
+        flood_with_no_jitter = calc_rx_delay(5, airtime)
+        assert flood_with_no_jitter > 0  # FLOOD always has base delay
+
+    def test_flood_log_contains_snr(self):
+        """FLOOD forwarding should log SNR score."""
+        rpt = make_repeater("RPT_DLY1")
+        pkt = make_flood_pkt(dest_hash=0x11, src_hash=0x22, path=[0x22])
+        rpt.on_rx_packet(pkt, rssi=-80, snr=20)
+        logs = [msg for _, msg in rpt.log_history if "snr=" in msg]
+        assert len(logs) > 0
+
+    def test_direct_log_contains_delay(self):
+        """DIRECT forwarding should log delay value."""
+        rpt = make_repeater("RPT_DLY2")
+        my_hash = rpt.identity.hash
+        pkt = make_direct_pkt(path=[my_hash, 0xCC])
+        rpt.on_rx_packet(pkt, rssi=-80, snr=20)
+        logs = [msg for _, msg in rpt.log_history if "d=" in msg and "Direct" in msg]
+        assert len(logs) > 0

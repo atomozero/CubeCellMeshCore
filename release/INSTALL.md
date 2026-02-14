@@ -1,4 +1,4 @@
-# CubeCellMeshCore v0.4.0 - Installation Guide
+# CubeCellMeshCore v0.5.0 - Installation Guide
 
 ## Requirements
 
@@ -83,6 +83,7 @@ Connect at **115200 baud** to access the serial console.
 | `contacts` | List known contacts |
 | `ping` | Send broadcast test packet (FLOOD) |
 | `ping <hash>` | Directed ping to node `<hash>`, auto-PONG reply |
+| `trace <hash>` | Trace route to node, shows path and hop count |
 
 ## MeshCore App Connection
 
@@ -98,8 +99,8 @@ Connect at **115200 baud** to access the serial console.
 Default passwords are empty. Set them via serial console:
 
 ```
-adminpw myAdminPassword
-guestpw myGuestPassword
+passwd admin myAdminPassword
+passwd guest myGuestPassword
 save
 ```
 

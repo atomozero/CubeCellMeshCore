@@ -217,6 +217,7 @@ Commands available via encrypted mesh messages:
 - `location <lat> <lon>` - Set location
 - `ping` - Send broadcast test packet (FLOOD)
 - `ping <hash>` - Directed ping to node `<hash>`, auto-PONG reply
+- `trace <hash>` - Trace route to node `<hash>`, shows path and hop count
 - `rxboost [on|off]` - Show or toggle RX boost
 - `advert` - Trigger ADVERT
 - `advert interval <s>` - Set interval

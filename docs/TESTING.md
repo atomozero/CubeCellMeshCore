@@ -114,6 +114,15 @@ Pass: "[P] -> A3 #N" and "[P] TX ok" displayed
 Note: Requires a second node with hash A3 to verify PONG response
 ```
 
+#### 3.7 Directed Trace
+```
+Command: trace A3
+Expected: Directed trace sent to node A3, waits for trace response
+Pass: "[P] ~> A3 #N" and "[P] TX ok" displayed
+      If node A3 is reachable: "[P] TRACE A3 <name> <rssi> <hops> rssi=<val> snr=<val>dB p=<hops>"
+Note: Trace response includes hop count and RSSI at destination node
+```
+
 ---
 
 ### 4. Telemetry Tests

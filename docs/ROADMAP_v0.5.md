@@ -384,8 +384,105 @@ Correzioni:
 
 **Stato post-Fase 3.2**: In attesa di compilazione (stima ~+200 B Flash)
 
-### Ordine completato: Fase 0 -> 1 -> 2 -> 2.5 -> 3 -> 3.1 -> 3.2
-Tutte le feature pianificate sono state implementate.
+## Fase 3.3: SNR Adaptive Delay (MeshCore-style)
+
+### Problema
+Il delay pre-TX usava `getTxDelayWeighted(lastSnr)` con il SNR dell'ultimo pacchetto
+ricevuto (generico), non del pacchetto specifico da inoltrare. L'approccio MeshCore ufficiale
+usa il SNR del pacchetto ricevuto con lookup table e differenzia FLOOD vs DIRECT.
+
+### Implementazione
+
+**Nuove funzioni** (sostituiscono `getTxDelayWeighted()`):
+- `calcSnrScore(snr)`: mappa SNR*4 [-80..60] a indice [0..10]
+- `calcRxDelay(scoreIdx, airtimeMs)`: lookup table 11 valori, delay proporzionale all'airtime
+- `calcTxJitter(airtimeMs)`: 0-6 slot random di 2x airtime
+
+**Lookup table** (22 bytes, dal MeshCore ufficiale):
+```
+{1293, 1105, 936, 783, 645, 521, 410, 310, 220, 139, 65}
+```
+`rxDelay = snrDelayTable[idx] * airtimeMs / 1000`
+
+**Logica delay nel TX loop**:
+- DIRECT: `MC_TX_DELAY_MIN + calcTxJitter(airtime) / 2` (priorita' alta)
+- FLOOD: `MC_TX_DELAY_MIN + calcRxDelay(score, airtime) + calcTxJitter(airtime)`
+
+**Soglia RSSI**: `MC_MIN_RSSI_FORWARD = -120 dBm`
+- Pacchetti con segnale troppo debole non vengono inoltrati
+- Aggiunto check in `shouldForward()`
+
+**Decisione architetturale**: mantenuto delay bloccante nel main loop invece di delay queue
+separata. Il TxQueue + delay bloccante con abort su RX e' funzionalmente equivalente
+e non richiede RAM aggiuntiva.
+
+### Simulatore
+- Funzioni `calc_snr_score()`, `calc_rx_delay()`, `calc_tx_jitter()` portate in `sim/node.py`
+- `_should_forward()` aggiornata con check RSSI minimo
+- Forwarding log ora include delay calcolato e SNR score
+
+### Test
+- 25 nuovi test in `sim/tests/test_direct_routing.py`:
+  - `TestCalcSnrScore`: mapping, clamping, monotonicita'
+  - `TestCalcRxDelay`: worst/best SNR, scaling, clamping
+  - `TestCalcTxJitter`: range, bounds
+  - `TestRssiThreshold`: soglia -120dBm per FLOOD e DIRECT
+  - `TestDirectVsFloodDelay`: DIRECT delay < FLOOD delay
+
+**Costo**: ~+50 B Flash (lookup table 22B + nuove funzioni - vecchia funzione rimossa), 0 RAM, 0 EEPROM
+
+### Ordine completato: Fase 0 -> 1 -> 2 -> 2.5 -> 3 -> 3.1 -> 3.2 -> 3.3
+
+---
+
+## Fase 3.4: Quiet Hours + Circuit Breaker + Adaptive TX Power (COMPLETATA)
+
+### Feature 4: Quiet Hours (Rate Limiting Notturno)
+Durante ore configurabili (es. 22:00-06:00) riduce il forward rate limit da 100/60s a 30/60s.
+Risparmia batteria e riduce rumore di rete durante periodi di basso traffico.
+Richiede TimeSync attivo; senza sync usa il limite pieno (safe default).
+
+- `RepeaterHelper`: quietStartHour, quietEndHour, quietForwardMax, inQuietPeriod
+- `evaluateQuietHours()`: gestisce wrap notturno (22>06), riconfura `forwardLimiter`
+- CLI: `quiet` (read), `quiet <start> <end>`, `quiet off` (admin)
+- Config RAM-only (EEPROM piena), ri-configurabile via CLI
+- Costo: ~300 B Flash, 5 B RAM
+
+### Feature 10: Circuit Breaker per Link Degradati
+Quando l'SNR di un neighbour scende sotto -10dB (SNR*4=-40), apre il circuit breaker
+e blocca il forwarding DIRECT verso quel neighbour. Dopo 5 min passa a half-open.
+Se riceve un pacchetto con buon SNR, chiude. FLOOD non bloccato.
+
+- `NeighbourInfo`: +cbState (0=closed, 1=open, 2=half-open)
+- `NeighbourTracker::update()`: transizioni CB in base a SNR
+- `NeighbourTracker::cleanExpired()`: timeout OPEN→HALF_OPEN dopo 5 min
+- `isCircuitOpen(hash)`, `getCircuitBreakerCount()` per check e CLI
+- `processReceivedPacket()`: check CB prima del peel DIRECT
+- CLI: `cb` (read)
+- Costo: ~400 B Flash, 50 B RAM (1 byte × 50 slot)
+
+### Feature 11: Adaptive TX Power
+Ogni 60s valuta l'SNR medio dei neighbour attivi. Se tutti hanno buon segnale (>+10dB),
+riduce potenza TX di 2dBm. Se segnale debole (<-5dB), aumenta di 2dBm.
+Floor 5dBm, ceiling MC_TX_POWER.
+
+- `RepeaterHelper`: currentTxPower, adaptiveTxEnabled
+- `evaluateAdaptiveTxPower()`: media SNR neighbour, step ±2dBm
+- CLI: `txpower` (read), `txpower auto on/off`, `txpower <N>` (admin)
+- Costo: ~500 B Flash, 2 B RAM
+
+### Simulatore
+- `sim/node.py`: tutte e 3 le feature portate in SimRepeater
+- Circuit breaker: `cb_state` nel dict neighbour, check in forwarding DIRECT
+- Quiet hours: `_evaluate_quiet_hours()` con wrap notturno
+- Adaptive TX: `evaluate_adaptive_tx_power()` con stessa logica firmware
+
+### Test (27 nuovi test)
+- `sim/tests/test_quiet_hours.py`: 8 test (config, wrap notturno, transizioni)
+- `sim/tests/test_circuit_breaker.py`: 8 test (stati, forwarding DIRECT bloccato, FLOOD non bloccato)
+- `sim/tests/test_adaptive_tx.py`: 11 test (config, step up/down, floor/ceiling, tick)
+
+### Ordine completato: Fase 0 -> 1 -> 2 -> 2.5 -> 3 -> 3.1 -> 3.2 -> 3.3 -> 3.4
 
 ---
 
@@ -401,10 +498,12 @@ Tutte le feature pianificate sono state implementate.
 | Fase 3 (Mailbox) | +1,752 B | +512 B | 172 B | 2 EEPROM + 4 RAM slots |
 | Fase 3.1 (Fix+Dedup) | +136 B | 0 | 0 | Session expiry, dedup, CLI fix |
 | Fase 3.2 (DIRECT+Health) | ~+200 B | 0 | 0 | DIRECT routing, health dashboard, loop prevention |
-| **Totale** | **~-9,132 B** | **-312 B** | **+172 B** | |
-| **Finale (stimato)** | **~119,548 B (91.2%)** | **7,848 B (47.9%)** | **512/512** | |
+| Fase 3.3 (SNR Delay) | ~+50 B | 0 | 0 | Lookup table 22B, nuove funzioni, RSSI threshold |
+| Fase 3.4 (QH+CB+ATX) | ~+1,200 B | +57 B | 0 | Quiet Hours, Circuit Breaker, Adaptive TX |
+| **Totale** | **~-7,882 B** | **-255 B** | **+172 B** | |
+| **Finale (stimato)** | **~120,798 B (92.1%)** | **7,905 B (48.3%)** | **512/512** | |
 
-**Margine residuo**: ~11,524 B Flash liberi, 8,536 B RAM liberi
+**Margine residuo**: ~10,274 B Flash liberi, 8,479 B RAM liberi
 
 ---
 
@@ -414,4 +513,5 @@ Tutte le feature pianificate sono state implementate.
 - **Health Monitor**: alert entro 5 minuti dalla scomparsa di un nodo
 - **Mailbox**: messaggio consegnato entro 30s dal ritorno del nodo destinatario
 - **Stabilita'**: zero regressioni sui 66 test firmware esistenti
-- **Flash**: margine residuo 11.8 KB dopo tutte le feature (era 2.3 KB pre-ottimizzazione)
+- **SNR Adaptive Delay**: DIRECT delay < FLOOD delay; SNR migliore = ritrasmissione piu' veloce; pacchetti sotto -120 dBm scartati
+- **Flash**: margine residuo ~11.4 KB dopo tutte le feature (era 2.3 KB pre-ottimizzazione)

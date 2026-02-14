@@ -308,6 +308,20 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
             strlen(sessionManager.getGuestPassword()) > 0 ? sessionManager.getGuestPassword() : "(off)",
             sessionManager.getSessionCount());
     }
+    else if (strcmp(cmd, "quiet") == 0) {
+        if (repeaterHelper.isQuietHoursEnabled())
+            CP("Quiet:%d-%d max:%d %s\n", repeaterHelper.getQuietStartHour(),
+                repeaterHelper.getQuietEndHour(), repeaterHelper.getQuietForwardMax(),
+                repeaterHelper.isInQuietPeriod() ? "ACTIVE" : "idle");
+        else CP("Quiet:off\n");
+    }
+    else if (strcmp(cmd, "cb") == 0) {
+        CP("CB:%d\n", repeaterHelper.getNeighbours().getCircuitBreakerCount());
+    }
+    else if (strcmp(cmd, "txpower") == 0) {
+        CP("TxP:%ddBm max:%d auto:%s\n", repeaterHelper.getCurrentTxPower(),
+            MC_TX_POWER, repeaterHelper.isAdaptiveTxEnabled() ? "on" : "off");
+    }
     // --- Admin-only commands ---
     else if (!isAdmin) {
         return false;  // not a read-only command; caller handles admin gate
@@ -435,6 +449,41 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
     }
     else if (strcmp(cmd, "mailbox clear") == 0) {
         mailbox.clear(); CP("mbox clr\n");
+    }
+    else if (strncmp(cmd, "quiet ", 6) == 0) {
+        if (strcmp(cmd + 6, "off") == 0) {
+            repeaterHelper.disableQuietHours(); CP("quiet:off\n");
+        } else {
+            char* args = (char*)(cmd + 6);
+            char* space = strchr(args, ' ');
+            if (space) {
+                *space = '\0';
+                uint8_t start = (uint8_t)atoi(args);
+                uint8_t end = (uint8_t)atoi(space + 1);
+                if (start <= 23 && end <= 23) {
+                    repeaterHelper.setQuietHours(start, end);
+                    CP("quiet:%d-%d\n", start, end);
+                } else CP("E:0-23\n");
+            } else CP("E:quiet <start> <end>\n");
+        }
+    }
+    else if (strcmp(cmd, "txpower auto on") == 0) {
+        repeaterHelper.setAdaptiveTxEnabled(true); CP("TxP auto:on\n");
+    }
+    else if (strcmp(cmd, "txpower auto off") == 0) {
+        repeaterHelper.setAdaptiveTxEnabled(false);
+        repeaterHelper.setTxPower(MC_TX_POWER);
+        radio.setOutputPower(MC_TX_POWER);
+        CP("TxP:%ddBm auto:off\n", MC_TX_POWER);
+    }
+    else if (strncmp(cmd, "txpower ", 8) == 0) {
+        int8_t p = (int8_t)atoi(cmd + 8);
+        if (p >= ADAPTIVE_TX_MIN_POWER && p <= MC_TX_POWER) {
+            repeaterHelper.setAdaptiveTxEnabled(false);
+            repeaterHelper.setTxPower(p);
+            radio.setOutputPower(p);
+            CP("TxP:%ddBm\n", p);
+        } else CP("E:%d-%d\n", ADAPTIVE_TX_MIN_POWER, MC_TX_POWER);
     }
     else if (strcmp(cmd, "save") == 0) {
         saveConfig(); CP("saved\n");
@@ -916,16 +965,32 @@ uint32_t calculatePacketAirtime(uint16_t packetLen) {
     return (preambleUs + (uint32_t)payloadSym * tSymUs) / 1000 + 1;
 }
 
-uint32_t getTxDelayWeighted(int8_t snr) {
-    // High SNR = longer delay (let weaker nodes go first)
-    // Low SNR = shorter delay (we might be far away)
-    const int8_t SNR_MIN = -20 * 4;  // -20dB in 0.25dB units
-    const int8_t SNR_MAX = 15 * 4;   // +15dB
+// SNR-weighted delay lookup table (MeshCore-style)
+// Index 0 = worst SNR (-20dB), index 10 = best SNR (+15dB)
+// Values are delay multipliers x1000 (integer math, no float)
+static const uint16_t snrDelayTable[] = {
+    1293, 1105, 936, 783, 645, 521, 410, 310, 220, 139, 65
+};
 
-    // Map SNR to CW size (2-8)
-    uint8_t cwSize = map(constrain(snr, SNR_MIN, SNR_MAX), SNR_MIN, SNR_MAX, 2, 8);
+uint8_t calcSnrScore(int8_t snr) {
+    // snr is in 0.25dB units (SNR*4). Map to index [0-10].
+    // -20dB (*4=-80) -> 0, +15dB (*4=60) -> 10
+    int16_t clamped = snr;
+    if (clamped < -80) clamped = -80;
+    if (clamped > 60) clamped = 60;
+    // Linear map: (clamped + 80) * 10 / 140
+    return (uint8_t)(((int16_t)(clamped + 80) * 10) / 140);
+}
 
-    return random(0, 2 * cwSize) * slotTimeMsec;
+uint32_t calcRxDelay(uint8_t scoreIdx, uint32_t airtimeMs) {
+    // Better SNR = lower index value = shorter delay = faster retransmission
+    if (scoreIdx > 10) scoreIdx = 10;
+    return (uint32_t)snrDelayTable[scoreIdx] * airtimeMs / 1000;
+}
+
+uint32_t calcTxJitter(uint32_t airtimeMs) {
+    uint32_t slotTime = airtimeMs * 2;
+    return random(0, 7) * slotTime;  // 0-6 slots
 }
 
 bool isActivelyReceiving() {
@@ -1686,6 +1751,11 @@ bool shouldForward(MCPacket* pkt) {
         return false;
     }
 
+    // RSSI threshold: don't forward packets with very weak signal
+    if (pkt->rssi < MC_MIN_RSSI_FORWARD) {
+        return false;
+    }
+
     // DIRECT routing: check if we are the next hop (path[0] == our hash)
     if (isDirect) {
         if (pkt->pathLen == 0) return false;
@@ -1809,9 +1879,10 @@ bool processDiscoverRequest(MCPacket* pkt) {
     respPkt.payloadLen = pos;
 
     // Add random delay to spread responses from multiple repeaters
-    // Delay = retransmit_delay * 4 * random factor
-    uint32_t baseDelay = getTxDelayWeighted(pkt->snr);
-    uint32_t randomDelay = random(baseDelay * 2, baseDelay * 6);
+    uint32_t airtime = calculatePacketAirtime(respPkt.payloadLen + respPkt.pathLen + 2);
+    uint8_t score = calcSnrScore(pkt->snr);
+    uint32_t rxDel = calcRxDelay(score, airtime);
+    uint32_t randomDelay = rxDel + calcTxJitter(airtime);
 
     LOG(TAG_DISCOVERY " RESP %lums\n\r", randomDelay);
 
@@ -2625,6 +2696,14 @@ void processReceivedPacket(MCPacket* pkt) {
             LOG(TAG_FWD " Rate lim\n\r");
         } else {
             if (pkt->header.isDirect()) {
+                // Circuit breaker: check next hop before peel
+                if (pkt->pathLen >= 2) {
+                    uint8_t nextHop = pkt->path[1];
+                    if (repeaterHelper.getNeighbours().isCircuitOpen(nextHop)) {
+                        LOG(TAG_FWD " CB %02X\n\r", nextHop);
+                        goto skipForward;
+                    }
+                }
                 // DIRECT routing: remove ourselves from path[0] (peel)
                 pkt->pathLen--;
                 for (uint8_t i = 0; i < pkt->pathLen; i++) {
@@ -2642,6 +2721,7 @@ void processReceivedPacket(MCPacket* pkt) {
             statsRecordFwd();  // Persistent stats
             LOG(TAG_FWD " Q p=%d\n\r", pkt->pathLen);
         }
+        skipForward:;
     }
 }
 
@@ -2792,8 +2872,17 @@ void loop() {
     if (txQueue.getCount() > 0 && !dio1Flag) {
         MCPacket pkt;
         if (txQueue.pop(&pkt)) {
-            // SNR-weighted delay (higher SNR = longer wait)
-            uint32_t txDelay = MC_TX_DELAY_MIN + getTxDelayWeighted(lastSnr);
+            // SNR adaptive delay using per-packet SNR
+            uint32_t airtime = calculatePacketAirtime(pkt.payloadLen + pkt.pathLen + 2);
+            uint32_t txDelay;
+            if (pkt.header.isDirect()) {
+                // DIRECT: half jitter only (higher priority)
+                txDelay = MC_TX_DELAY_MIN + calcTxJitter(airtime) / 2;
+            } else {
+                // FLOOD: rxDelay (SNR-weighted) + full jitter
+                uint8_t score = calcSnrScore(pkt.snr);
+                txDelay = MC_TX_DELAY_MIN + calcRxDelay(score, airtime) + calcTxJitter(airtime);
+            }
             LOG(TAG_TX " Wait %lums\n\r", txDelay);
 
             activeReceiveStart = 0;
@@ -2843,6 +2932,20 @@ void loop() {
             sessionManager.cleanupSessions();  // Expire idle sessions (1h)
             if (timeSync.isSynchronized()) {
                 mailbox.expireOld(timeSync.getTimestamp());
+                // Quiet hours evaluation
+                if (repeaterHelper.isQuietHoursEnabled()) {
+                    TimeSync::DateTime dt;
+                    TimeSync::timestampToDateTime(timeSync.getTimestamp(), dt);
+                    repeaterHelper.evaluateQuietHours(dt.hour);
+                }
+            }
+            // Adaptive TX power evaluation
+            {
+                int8_t newPower = repeaterHelper.evaluateAdaptiveTxPower();
+                if (newPower >= 0) {
+                    radio.setOutputPower(newPower);
+                    LOG(TAG_INFO " TxP:%ddBm\n\r", newPower);
+                }
             }
             lastCleanup = millis();
         }

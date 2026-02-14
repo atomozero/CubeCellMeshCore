@@ -41,6 +41,22 @@
 #define RATE_LIMIT_FORWARD_MAX      100      // Max forwards per window
 #define RATE_LIMIT_FORWARD_SECS     60       // Forward window: 1 minute
 
+// Circuit breaker constants
+#define CB_SNR_THRESHOLD            -40      // SNR*4 = -10dB
+#define CB_TIMEOUT_MS               300000   // 5 min → half-open
+#define CB_STATE_CLOSED             0
+#define CB_STATE_OPEN               1
+#define CB_STATE_HALF_OPEN          2
+
+// Adaptive TX power constants
+#define ADAPTIVE_TX_HIGH_SNR        40       // SNR*4 = +10dB → reduce power
+#define ADAPTIVE_TX_LOW_SNR         -20      // SNR*4 = -5dB → increase power
+#define ADAPTIVE_TX_STEP            2        // dBm per step
+#define ADAPTIVE_TX_MIN_POWER       5        // dBm floor
+#ifndef MC_TX_POWER
+#define MC_TX_POWER                 14       // default EU, overridden by main.h
+#endif
+
 // Default passwords
 #define DEFAULT_ADMIN_PASSWORD      "password"
 #define DEFAULT_GUEST_PASSWORD      "hello"
@@ -157,6 +173,7 @@ struct NeighbourInfo {
     int8_t snr;                 // SNR * 4
     int16_t rssi;               // RSSI in dBm
     bool valid;                 // Entry is valid
+    uint8_t cbState;            // Circuit breaker: 0=closed, 1=open, 2=half-open
 
     void clear() {
         memset(pubKeyPrefix, 0, 6);
@@ -164,6 +181,7 @@ struct NeighbourInfo {
         snr = 0;
         rssi = 0;
         valid = false;
+        cbState = CB_STATE_CLOSED;
     }
 };
 
@@ -241,6 +259,13 @@ public:
                 neighbours[i].lastHeard = now;
                 neighbours[i].snr = snr;
                 neighbours[i].rssi = rssi;
+                // Circuit breaker: update state based on SNR
+                if (snr < CB_SNR_THRESHOLD) {
+                    if (neighbours[i].cbState == CB_STATE_CLOSED)
+                        neighbours[i].cbState = CB_STATE_OPEN;
+                } else if (neighbours[i].cbState != CB_STATE_CLOSED) {
+                    neighbours[i].cbState = CB_STATE_CLOSED;  // good SNR → close
+                }
                 return false;  // Not new
             }
         }
@@ -313,9 +338,35 @@ public:
             if (neighbours[i].valid) {
                 if ((now - neighbours[i].lastHeard) > NEIGHBOUR_TIMEOUT_MS) {
                     neighbours[i].clear();
+                } else if (neighbours[i].cbState == CB_STATE_OPEN &&
+                           (now - neighbours[i].lastHeard) > CB_TIMEOUT_MS) {
+                    neighbours[i].cbState = CB_STATE_HALF_OPEN;
                 }
             }
         }
+    }
+
+    /**
+     * Check if circuit breaker is open for a given node hash
+     */
+    bool isCircuitOpen(uint8_t hash) const {
+        for (int i = 0; i < MAX_NEIGHBOURS; i++) {
+            if (neighbours[i].valid && neighbours[i].pubKeyPrefix[0] == hash)
+                return neighbours[i].cbState == CB_STATE_OPEN;
+        }
+        return false;
+    }
+
+    /**
+     * Count neighbours with open circuit breakers
+     */
+    uint8_t getCircuitBreakerCount() const {
+        uint8_t cnt = 0;
+        for (int i = 0; i < MAX_NEIGHBOURS; i++) {
+            if (neighbours[i].valid && neighbours[i].cbState == CB_STATE_OPEN)
+                cnt++;
+        }
+        return cnt;
     }
 
     /**
@@ -613,11 +664,24 @@ private:
     uint8_t maxFloodHops;
     bool rateLimitEnabled;
 
+    // Quiet Hours
+    uint8_t quietStartHour;     // 0-23, 0xFF = disabled
+    uint8_t quietEndHour;       // 0-23
+    uint16_t quietForwardMax;   // forward limit during quiet hours
+    bool inQuietPeriod;         // current state
+
+    // Adaptive TX Power
+    int8_t currentTxPower;      // current TX power in dBm
+    bool adaptiveTxEnabled;     // flag
+
 public:
     RepeaterHelper() : identity(nullptr), startTime(0),
                        txAirTimeAccumMs(0), rxAirTimeAccumMs(0),
                        repeatEnabled(true), maxFloodHops(8),
                        rateLimitEnabled(true),
+                       quietStartHour(0xFF), quietEndHour(0),
+                       quietForwardMax(30), inQuietPeriod(false),
+                       currentTxPower(MC_TX_POWER), adaptiveTxEnabled(false),
                        loginLimiter(RATE_LIMIT_LOGIN_MAX, RATE_LIMIT_LOGIN_SECS),
                        requestLimiter(RATE_LIMIT_REQUEST_MAX, RATE_LIMIT_REQUEST_SECS),
                        forwardLimiter(RATE_LIMIT_FORWARD_MAX, RATE_LIMIT_FORWARD_SECS) {
@@ -1024,6 +1088,90 @@ public:
 
         // Check if we match the filter
         return (*filterMask & (1 << MC_TYPE_REPEATER)) != 0;
+    }
+
+    //=========================================================================
+    // Quiet Hours
+    //=========================================================================
+
+    void setQuietHours(uint8_t start, uint8_t end, uint16_t maxFwd = 30) {
+        quietStartHour = start;
+        quietEndHour = end;
+        quietForwardMax = maxFwd;
+    }
+
+    void disableQuietHours() {
+        quietStartHour = 0xFF;
+        quietEndHour = 0;
+        inQuietPeriod = false;
+        forwardLimiter.configure(RATE_LIMIT_FORWARD_MAX, RATE_LIMIT_FORWARD_SECS);
+    }
+
+    bool isQuietHoursEnabled() const { return quietStartHour != 0xFF; }
+    bool isInQuietPeriod() const { return inQuietPeriod; }
+    uint8_t getQuietStartHour() const { return quietStartHour; }
+    uint8_t getQuietEndHour() const { return quietEndHour; }
+    uint16_t getQuietForwardMax() const { return quietForwardMax; }
+
+    void evaluateQuietHours(uint8_t currentHour) {
+        if (quietStartHour == 0xFF) return;
+        bool shouldBeQuiet;
+        if (quietStartHour <= quietEndHour) {
+            // Same-day range (e.g., 08-18)
+            shouldBeQuiet = (currentHour >= quietStartHour && currentHour < quietEndHour);
+        } else {
+            // Overnight wrap (e.g., 22-06)
+            shouldBeQuiet = (currentHour >= quietStartHour || currentHour < quietEndHour);
+        }
+        if (shouldBeQuiet != inQuietPeriod) {
+            inQuietPeriod = shouldBeQuiet;
+            if (shouldBeQuiet) {
+                forwardLimiter.configure(quietForwardMax, RATE_LIMIT_FORWARD_SECS);
+            } else {
+                forwardLimiter.configure(RATE_LIMIT_FORWARD_MAX, RATE_LIMIT_FORWARD_SECS);
+            }
+        }
+    }
+
+    //=========================================================================
+    // Adaptive TX Power
+    //=========================================================================
+
+    int8_t getCurrentTxPower() const { return currentTxPower; }
+    bool isAdaptiveTxEnabled() const { return adaptiveTxEnabled; }
+    void setAdaptiveTxEnabled(bool en) { adaptiveTxEnabled = en; }
+    void setTxPower(int8_t power) { currentTxPower = power; }
+
+    int8_t evaluateAdaptiveTxPower() {
+        if (!adaptiveTxEnabled) return -1;
+        uint8_t cnt = neighbours.getCount();
+        if (cnt == 0) return -1;
+
+        int32_t sum = 0;
+        uint8_t validCnt = 0;
+        for (uint8_t i = 0; i < cnt; i++) {
+            const NeighbourInfo* n = neighbours.getNeighbour(i);
+            if (n) {
+                sum += n->snr;
+                validCnt++;
+            }
+        }
+        if (validCnt == 0) return -1;
+
+        int32_t avg = sum / validCnt;
+        int8_t oldPower = currentTxPower;
+
+        if (avg > ADAPTIVE_TX_HIGH_SNR) {
+            currentTxPower -= ADAPTIVE_TX_STEP;
+            if (currentTxPower < ADAPTIVE_TX_MIN_POWER)
+                currentTxPower = ADAPTIVE_TX_MIN_POWER;
+        } else if (avg < ADAPTIVE_TX_LOW_SNR) {
+            currentTxPower += ADAPTIVE_TX_STEP;
+            if (currentTxPower > MC_TX_POWER)
+                currentTxPower = MC_TX_POWER;
+        }
+
+        return (currentTxPower != oldPower) ? currentTxPower : -1;
     }
 
     /**

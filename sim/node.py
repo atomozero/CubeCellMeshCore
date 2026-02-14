@@ -22,6 +22,20 @@ from sim.config import (
     DEFAULT_ADVERT_INTERVAL_MS,
 )
 
+# Circuit breaker constants
+CB_SNR_THRESHOLD = -40   # SNR*4 = -10dB
+CB_TIMEOUT_MS = 300000   # 5 min → half-open
+CB_STATE_CLOSED = 0
+CB_STATE_OPEN = 1
+CB_STATE_HALF_OPEN = 2
+
+# Adaptive TX power constants
+ADAPTIVE_TX_HIGH_SNR = 40    # SNR*4 = +10dB → reduce power
+ADAPTIVE_TX_LOW_SNR = -20    # SNR*4 = -5dB → increase power
+ADAPTIVE_TX_STEP = 2         # dBm per step
+ADAPTIVE_TX_MIN_POWER = 5    # dBm floor
+DEFAULT_TX_POWER = 14        # EU default max
+
 # Log tag prefixes (match firmware)
 TAG_RX = "[R]"
 TAG_FWD = "[F]"
@@ -33,6 +47,34 @@ TAG_ERROR = "[E]"
 TAG_INFO = "[I]"
 
 ADVERT_AFTER_SYNC_MS = 5000  # 5s delay after time sync before sending ADVERT
+
+# SNR adaptive delay constants (MeshCore-style)
+MC_MIN_RSSI_FORWARD = -120  # dBm minimum RSSI to forward a packet
+
+# Delay multipliers x1000, index 0 = worst SNR (-20dB), 10 = best (+15dB)
+SNR_DELAY_TABLE = [1293, 1105, 936, 783, 645, 521, 410, 310, 220, 139, 65]
+
+
+def calc_snr_score(snr: int) -> int:
+    """Map SNR (in 0.25dB units, i.e. SNR*4) to index [0-10].
+    -20dB (*4=-80) -> 0, +15dB (*4=60) -> 10."""
+    clamped = max(-80, min(60, snr))
+    return (clamped + 80) * 10 // 140
+
+
+def calc_rx_delay(score_idx: int, airtime_ms: int) -> int:
+    """Calculate RX delay from SNR score and airtime.
+    Better SNR = higher index = shorter delay."""
+    idx = max(0, min(10, score_idx))
+    return SNR_DELAY_TABLE[idx] * airtime_ms // 1000
+
+
+def calc_tx_jitter(airtime_ms: int) -> int:
+    """Calculate random TX jitter: 0-6 slots of 2x airtime.
+    Returns max possible jitter (deterministic for testing)."""
+    import random as _rng
+    slot_time = airtime_ms * 2
+    return _rng.randint(0, 6) * slot_time
 
 
 class SimNode:
@@ -267,8 +309,21 @@ class SimRepeater(SimNode):
         super().__init__(name, MC_TYPE_REPEATER, clock)
         self.config = NodeConfig()
         self.forward_limiter = RateLimiter(RATE_LIMIT_FORWARD_MAX, RATE_LIMIT_FORWARD_SECS)
-        self.neighbours: list[dict] = []  # [{hash, rssi, snr, last_seen}]
+        self.neighbours: list[dict] = []  # [{hash, rssi, snr, last_seen, cb_state}]
         self.mailbox = Mailbox()
+
+        # Quiet Hours
+        self.quiet_start_hour: int = 0xFF  # disabled
+        self.quiet_end_hour: int = 0
+        self.quiet_forward_max: int = 30
+        self._in_quiet_period: bool = False
+        self._last_quiet_eval: int = 0
+
+        # Adaptive TX Power
+        self.current_tx_power: int = DEFAULT_TX_POWER
+        self.max_tx_power: int = DEFAULT_TX_POWER
+        self.adaptive_tx_enabled: bool = False
+        self._last_adaptive_eval: int = 0
 
     def on_rx_packet(self, pkt: MCPacket, rssi: int, snr: int):
         """Process received packet + forwarding logic."""
@@ -318,13 +373,25 @@ class SimRepeater(SimNode):
                 return
 
             fwd_pkt = pkt.copy()
+            # Compute SNR adaptive delay (logged, not enforced in sim)
+            airtime_est = 200  # default airtime estimate in ms
             if fwd_pkt.is_direct():
+                # Circuit breaker: check next hop before peel
+                if fwd_pkt.path_len >= 2:
+                    next_hop = fwd_pkt.path[1]
+                    if self._is_circuit_open(next_hop):
+                        self._log(f"{TAG_FWD} CB {next_hop:02X}")
+                        return
                 # DIRECT: remove ourselves from path[0] (peel)
                 fwd_pkt.path = fwd_pkt.path[1:]
-                self._log(f"{TAG_FWD} Direct p={fwd_pkt.path_len}")
+                fwd_delay = calc_tx_jitter(airtime_est) // 2
+                self._log(f"{TAG_FWD} Direct p={fwd_pkt.path_len} d={fwd_delay}ms")
             else:
                 # FLOOD: add our hash to path
                 fwd_pkt.path.append(self.identity.hash)
+                score = calc_snr_score(pkt.snr)
+                fwd_delay = calc_rx_delay(score, airtime_est) + calc_tx_jitter(airtime_est)
+                self._log(f"{TAG_FWD} Flood p={fwd_pkt.path_len} snr={score} d={fwd_delay}ms")
             self.tx_queue.add(fwd_pkt)
             self.stats.fwd_count += 1
             self._log(f"{TAG_FWD} Q p={fwd_pkt.path_len}")
@@ -335,6 +402,10 @@ class SimRepeater(SimNode):
         is_direct = pkt.is_direct()
 
         if not is_flood and not is_direct:
+            return False
+
+        # RSSI threshold: don't forward packets with very weak signal
+        if pkt.rssi < MC_MIN_RSSI_FORWARD:
             return False
 
         # DIRECT routing: check if we are the next hop (path[0] == our hash)
@@ -370,11 +441,89 @@ class SimRepeater(SimNode):
                 n['rssi'] = rssi
                 n['snr'] = snr
                 n['last_seen'] = self.clock.millis()
+                # Circuit breaker: update state based on SNR
+                if snr < CB_SNR_THRESHOLD:
+                    if n.get('cb_state', CB_STATE_CLOSED) == CB_STATE_CLOSED:
+                        n['cb_state'] = CB_STATE_OPEN
+                elif n.get('cb_state', CB_STATE_CLOSED) != CB_STATE_CLOSED:
+                    n['cb_state'] = CB_STATE_CLOSED  # good SNR → close
                 return
         self.neighbours.append({
             'hash': hash_val, 'rssi': rssi, 'snr': snr,
-            'last_seen': self.clock.millis()
+            'last_seen': self.clock.millis(), 'cb_state': CB_STATE_CLOSED,
         })
+
+    # --- Circuit Breaker ---
+
+    def _is_circuit_open(self, hash_val: int) -> bool:
+        for n in self.neighbours:
+            if n['hash'] == hash_val:
+                return n.get('cb_state', CB_STATE_CLOSED) == CB_STATE_OPEN
+        return False
+
+    def get_circuit_breaker_count(self) -> int:
+        return sum(1 for n in self.neighbours
+                   if n.get('cb_state', CB_STATE_CLOSED) == CB_STATE_OPEN)
+
+    def _tick_circuit_breakers(self):
+        now = self.clock.millis()
+        for n in self.neighbours:
+            if (n.get('cb_state', CB_STATE_CLOSED) == CB_STATE_OPEN and
+                    (now - n['last_seen']) > CB_TIMEOUT_MS):
+                n['cb_state'] = CB_STATE_HALF_OPEN
+
+    # --- Quiet Hours ---
+
+    def set_quiet_hours(self, start: int, end: int, max_fwd: int = 30):
+        self.quiet_start_hour = start
+        self.quiet_end_hour = end
+        self.quiet_forward_max = max_fwd
+
+    def disable_quiet_hours(self):
+        self.quiet_start_hour = 0xFF
+        self.quiet_end_hour = 0
+        self._in_quiet_period = False
+        self.forward_limiter.max_count = RATE_LIMIT_FORWARD_MAX
+
+    def is_quiet_hours_enabled(self) -> bool:
+        return self.quiet_start_hour != 0xFF
+
+    def _evaluate_quiet_hours(self, current_hour: int):
+        if self.quiet_start_hour == 0xFF:
+            return
+        if self.quiet_start_hour <= self.quiet_end_hour:
+            should_be_quiet = (current_hour >= self.quiet_start_hour and
+                               current_hour < self.quiet_end_hour)
+        else:
+            # Overnight wrap (e.g., 22-06)
+            should_be_quiet = (current_hour >= self.quiet_start_hour or
+                               current_hour < self.quiet_end_hour)
+        if should_be_quiet != self._in_quiet_period:
+            self._in_quiet_period = should_be_quiet
+            if should_be_quiet:
+                self.forward_limiter.max_count = self.quiet_forward_max
+            else:
+                self.forward_limiter.max_count = RATE_LIMIT_FORWARD_MAX
+
+    # --- Adaptive TX Power ---
+
+    def evaluate_adaptive_tx_power(self) -> int:
+        """Returns new power if changed, -1 otherwise."""
+        if not self.adaptive_tx_enabled:
+            return -1
+        if not self.neighbours:
+            return -1
+        avg_snr = sum(n['snr'] for n in self.neighbours) // len(self.neighbours)
+        old_power = self.current_tx_power
+        if avg_snr > ADAPTIVE_TX_HIGH_SNR:
+            self.current_tx_power -= ADAPTIVE_TX_STEP
+            if self.current_tx_power < ADAPTIVE_TX_MIN_POWER:
+                self.current_tx_power = ADAPTIVE_TX_MIN_POWER
+        elif avg_snr < ADAPTIVE_TX_LOW_SNR:
+            self.current_tx_power += ADAPTIVE_TX_STEP
+            if self.current_tx_power > self.max_tx_power:
+                self.current_tx_power = self.max_tx_power
+        return self.current_tx_power if self.current_tx_power != old_power else -1
 
     def process_command(self, cmd: str) -> str:
         """Process CLI command. Port of processCommand()."""
@@ -444,6 +593,28 @@ class SimRepeater(SimNode):
             return f"{TAG_ERROR} Invalid hash 0"
         self.send_directed_trace(h)
         return f"{TAG_PING} ~> {h:02X}"
+
+
+    def tick(self) -> list[MCPacket]:
+        """Advance one tick with periodic maintenance."""
+        now = self.clock.millis()
+
+        # Periodic (every 60s): quiet hours, circuit breakers, adaptive TX
+        if now - self._last_quiet_eval >= 60000:
+            self._last_quiet_eval = now
+            # Quiet hours
+            if self.is_quiet_hours_enabled() and self.time_sync.is_synchronized():
+                ts = self.time_sync.get_timestamp()
+                hour = (ts % 86400) // 3600
+                self._evaluate_quiet_hours(hour)
+            # Circuit breaker timeouts
+            self._tick_circuit_breakers()
+            # Adaptive TX power
+            new_power = self.evaluate_adaptive_tx_power()
+            if new_power >= 0:
+                self._log(f"{TAG_INFO} TxP:{new_power}dBm")
+
+        return super().tick()
 
 
 class SimCompanion(SimNode):

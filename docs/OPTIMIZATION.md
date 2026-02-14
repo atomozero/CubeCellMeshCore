@@ -1,9 +1,9 @@
 # CubeCellMeshCore Memory Optimization Guide
 
 ## Current Status (After Optimizations)
-- **Flash**: 128,068 / 131,072 bytes (97.7%)
+- **Flash**: 128,728 / 131,072 bytes (98.2%)
 - **RAM**: 8,136 / 16,384 bytes (49.7%)
-- **Available**: ~3,004 bytes Flash
+- **Available**: ~2,344 bytes Flash
 - **Daily Report**: Disabled via `#define ENABLE_DAILY_REPORT`
 - **Note**: RAM 49.7% is static only; ~4 KB free at runtime (incl. stack/heap)
 
@@ -24,9 +24,10 @@
 | OPT-11 | Dead code removal (`sendAdvertNoFlags`) | 48 bytes Flash | ✅ Done |
 | OPT-12 | Shortened strings in processRemoteCommand + alert commands | 288 bytes Flash | ✅ Done |
 | OPT-13 | Reduced stack buffers (reportText, plaintext, encrypted, cmdStr) | Stack only | ✅ Done |
+| OPT-14 | Float→integer: battery ADC, CayenneLPP, coordinates, airtime | ~200-400 bytes Flash | ✅ Done |
+| OPT-15 | EEPROM save interval 5min→30min (48 writes/day vs 288) | 0 bytes (flash wear) | ✅ Done |
 
-**Total Flash saved vs baseline: ~2,800 bytes (before daily report)**
-**Net with daily report enabled: 128,444 bytes (98.0%) — 2,628 bytes free**
+**Total Flash saved vs baseline: ~3,000-3,200 bytes (before daily report)**
 
 ---
 
@@ -215,7 +216,8 @@ const char STR_SAVED[] PROGMEM = "Saved to EEPROM";
 - **After daily report enabled**: Flash 129,388 bytes (98.7%)
 - **After moderate optimizations**: Flash 128,444 bytes (98.0%), RAM 8,136 bytes (49.7%)
 - **After daily report disabled + directed ping**: Flash 128,068 bytes (97.7%)
-- **Available**: ~3,004 bytes Flash
+- **After trace command + float→int**: Flash 128,728 bytes (98.2%)
+- **Available**: ~2,344 bytes Flash
 
 ---
 

@@ -11,6 +11,9 @@ MeshCore-compatible repeater firmware for Heltec CubeCell HTCC-AB01.
 - **Session Security** - Idle sessions now expire after 1 hour.
 - **Loop Prevention** - FLOOD forwarding now checks if our hash is already in the path to prevent routing loops.
 - **Major Code Optimization** - Merged duplicate CLI handlers and eliminated float parsing. Saved 12.9 KB Flash (was 98.2%, now 91.0%).
+- **Quiet Hours** - Configurable night-time rate limiting (e.g., 22:00-06:00) reduces forward rate from 100 to 30 packets/min. Saves battery during low-traffic periods.
+- **Circuit Breaker** - Automatically blocks DIRECT forwarding to neighbours with degraded links (SNR < -10dB). Auto-recovers after 5 min or on good SNR. FLOOD unaffected.
+- **Adaptive TX Power** - Dynamically adjusts transmit power (5-14 dBm) based on average neighbour SNR. Reduces power when signal is strong, increases when weak.
 
 ## Features
 
@@ -32,7 +35,7 @@ MeshCore-compatible repeater firmware for Heltec CubeCell HTCC-AB01.
 
 - **Board**: Heltec CubeCell HTCC-AB01
 - **MCU**: ASR6501 (ARM Cortex-M0+ @ 48 MHz + SX1262)
-- **Flash**: 128 KB (91.0% used, ~12 KB free)
+- **Flash**: 128 KB (92.5% used, ~10 KB free)
 - **RAM**: 16 KB (47.9% used)
 - **Radio**: SX1262 LoRa (EU868: 869.618 MHz, BW 62.5 kHz, SF8, CR 4/8)
 

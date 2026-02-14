@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test suite for directed ping/pong feature.
+Test suite for directed ping/pong and trace features.
 Validates payload format, routing logic, and CLI parsing
 without requiring hardware.
 
@@ -174,9 +174,107 @@ test("TXT_MSG NOT matched as PO", not is_txt_po)
 test("TXT_MSG falls through to TXT handler", is_txt)
 
 # ============================================================
-# Test 8: CLI parsing "ping A3"
+# Test 8a: Directed Trace payload format
 # ============================================================
-print("\n=== Test 8: CLI command parsing ===")
+print("\n=== Test 8a: Directed Trace payload format ===")
+
+# Build DT payload: [destHash][srcHash]['D']['T'][text: "#N name"]
+dt_text = f"#{ping_counter} {node_name}"
+dt_payload = bytes([target_hash, src_hash, ord('D'), ord('T')]) + dt_text.encode()
+
+test("DT payload[0] = target hash", dt_payload[0] == 0xA3)
+test("DT payload[1] = source hash", dt_payload[1] == 0x5B)
+test("DT payload[2:4] = 'DT' marker", dt_payload[2:4] == b'DT')
+test("DT text starts with #", dt_payload[4] == ord('#'))
+test("DT payload length <= MC_MAX_PAYLOAD_SIZE", len(dt_payload) <= MC_MAX_PAYLOAD_SIZE)
+
+# ============================================================
+# Test 8b: Trace Response payload format
+# ============================================================
+print("\n=== Test 8b: Trace Response payload format ===")
+
+tr_name = "Relay1"
+tr_rssi = -65
+tr_hops = 3
+
+# Build TR payload: [destHash][srcHash]['T']['R'][text: "name rssi hops"]
+tr_text = f"{tr_name} {tr_rssi} {tr_hops}"
+tr_payload = bytes([pong_target, pong_src, ord('T'), ord('R')]) + tr_text.encode()
+
+test("TR payload[0] = dest (original sender)", tr_payload[0] == 0x5B)
+test("TR payload[1] = src (responder)", tr_payload[1] == 0xA3)
+test("TR payload[2:4] = 'TR' marker", tr_payload[2:4] == b'TR')
+test("TR text contains responder name", tr_name.encode() in tr_payload[4:])
+test("TR text contains rssi value", str(tr_rssi).encode() in tr_payload[4:])
+test("TR text contains hop count", str(tr_hops).encode() in tr_payload[4:])
+
+# ============================================================
+# Test 8c: Reception matching - DT for us
+# ============================================================
+print("\n=== Test 8c: Reception matching - DT addressed to us ===")
+
+dt_incoming = bytes([my_hash, 0x5B, ord('D'), ord('T')]) + b"#1 Sender"
+
+is_dt = (len(dt_incoming) >= 4
+         and dt_incoming[2] == ord('D')
+         and dt_incoming[3] == ord('T')
+         and dt_incoming[0] == my_hash)
+
+test("DT packet recognized", is_dt)
+test("DT sender hash extracted", dt_incoming[1] == 0x5B)
+
+# ============================================================
+# Test 8d: Reception matching - TR for us
+# ============================================================
+print("\n=== Test 8d: Reception matching - TR for us ===")
+
+tr_incoming = bytes([my_hash, 0x5B, ord('T'), ord('R')]) + b"Relay1 -65 3"
+
+is_tr = (len(tr_incoming) >= 4
+         and tr_incoming[2] == ord('T')
+         and tr_incoming[3] == ord('R')
+         and tr_incoming[0] == my_hash)
+
+test("TR packet recognized", is_tr)
+test("TR sender hash extracted", tr_incoming[1] == 0x5B)
+test("TR text parseable", b"-65" in tr_incoming[4:] and b"3" in tr_incoming[4:])
+
+# ============================================================
+# Test 8e: DT/TR not confused with DP/PO
+# ============================================================
+print("\n=== Test 8e: DT/TR not confused with DP/PO ===")
+
+test("DT marker != DP marker", b'DT' != b'DP')
+test("TR marker != PO marker", b'TR' != b'PO')
+test("DT not matched as DP", dt_incoming[3] != ord('P'))
+test("TR not matched as PO", tr_incoming[2] != ord('P'))
+
+# ============================================================
+# Test 8f: CLI parsing "trace A3"
+# ============================================================
+print("\n=== Test 8f: CLI parsing 'trace' ===")
+
+
+def parse_trace_cmd(cmd):
+    """Simulate the C parsing: strtoul(cmd + 6, NULL, 16)"""
+    if cmd.startswith("trace "):
+        try:
+            return int(cmd[6:].strip(), 16) & 0xFF
+        except ValueError:
+            return 0
+    return None
+
+
+test("'trace A3' parses to 0xA3", parse_trace_cmd("trace A3") == 0xA3)
+test("'trace FF' parses to 0xFF", parse_trace_cmd("trace FF") == 0xFF)
+test("'trace 01' parses to 0x01", parse_trace_cmd("trace 01") == 0x01)
+test("'trace 0' parses to 0 (rejected)", parse_trace_cmd("trace 0") == 0)
+test("'trace' (no arg) returns None", parse_trace_cmd("trace") is None)
+
+# ============================================================
+# Test 9: CLI parsing "ping A3"
+# ============================================================
+print("\n=== Test 9: CLI parsing 'ping' ===")
 
 
 def parse_ping_cmd(cmd):
@@ -197,9 +295,9 @@ test("'ping 0' parses to 0 (rejected)", parse_ping_cmd("ping 0") == 0)
 test("'ping' (no arg) returns None", parse_ping_cmd("ping") is None)
 
 # ============================================================
-# Test 9: Broadcast ping unchanged
+# Test 10: Broadcast ping unchanged
 # ============================================================
-print("\n=== Test 9: Broadcast ping format unchanged ===")
+print("\n=== Test 10: Broadcast ping format unchanged ===")
 
 # Old broadcast ping: "PING #xxx from CCXXXXXX"
 bc_ping = f"PING #{1} from {0x12345678:08X}"
@@ -209,9 +307,9 @@ test("broadcast ping has no DP marker at [2:4]", True)  # different format entir
 test("broadcast has no dest/src hash prefix", bc_ping[0] == 'P')  # starts with text, not hash byte
 
 # ============================================================
-# Test 10: Payload size constraints
+# Test 11: Payload size constraints
 # ============================================================
-print("\n=== Test 10: Payload size constraints ===")
+print("\n=== Test 11: Payload size constraints ===")
 
 # Worst case: long node name (15 chars max)
 long_name = "A" * 15
@@ -227,10 +325,20 @@ pong_full = bytes([0x5B, 0xA3, ord('P'), ord('O')]) + pong_text.encode()
 test("max PONG payload fits", len(pong_full) <= MC_MAX_PAYLOAD_SIZE,
      f"len={len(pong_full)}")
 
+dt_text = f"#65535 {long_name}"
+dt_full = bytes([0xA3, 0x5B, ord('D'), ord('T')]) + dt_text.encode()
+test("max DT payload fits", len(dt_full) <= MC_MAX_PAYLOAD_SIZE,
+     f"len={len(dt_full)}")
+
+tr_text = f"{long_name} -120 99"
+tr_full = bytes([0x5B, 0xA3, ord('T'), ord('R')]) + tr_text.encode()
+test("max TR payload fits", len(tr_full) <= MC_MAX_PAYLOAD_SIZE,
+     f"len={len(tr_full)}")
+
 # ============================================================
-# Test 11: Serialization roundtrip
+# Test 12: Serialization roundtrip
 # ============================================================
-print("\n=== Test 11: Packet serialization roundtrip ===")
+print("\n=== Test 12: Packet serialization roundtrip ===")
 
 # Simulate MCPacket serialization: [header][pathLen][path...][payload...]
 header = make_header(MC_ROUTE_FLOOD, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1)

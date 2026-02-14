@@ -76,6 +76,7 @@
 // Timing
 #define MC_TX_DELAY_MIN     50      // ms minimum delay before TX
 #define MC_TX_DELAY_MAX     500     // ms maximum random delay
+#define MC_MIN_RSSI_FORWARD -120    // dBm minimum RSSI to forward a packet
 
 // Watchdog and error recovery
 #define MC_WATCHDOG_ENABLED     true
@@ -365,7 +366,9 @@ bool shouldForward(MCPacket* pkt);
 uint32_t generateNodeId();
 void calculateTimings();
 uint32_t calculatePacketAirtime(uint16_t packetLen);
-uint32_t getTxDelayWeighted(int8_t snr);
+uint8_t calcSnrScore(int8_t snr);
+uint32_t calcRxDelay(uint8_t scoreIdx, uint32_t airtimeMs);
+uint32_t calcTxJitter(uint32_t airtimeMs);
 bool isActivelyReceiving();
 void feedWatchdog();
 void handleRadioError();

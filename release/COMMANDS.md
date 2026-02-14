@@ -90,6 +90,35 @@ Automatic mesh health monitoring. Checks every 60 seconds for offline nodes (>30
 
 The destination key is set automatically when an admin logs in from the MeshCore app.
 
+## Quiet Hours
+
+Reduce forward rate during configurable hours (e.g., 22:00-06:00). Saves battery. Requires TimeSync; without sync, full rate is used. Config is RAM-only (lost on reboot).
+
+| Command | Description |
+|---------|-------------|
+| `quiet` | Show quiet hours status |
+| `quiet <start> <end>` | Set quiet hours (0-23, admin) |
+| `quiet off` | Disable quiet hours (admin) |
+
+## Circuit Breaker
+
+Automatically blocks DIRECT forwarding to neighbours with degraded links (SNR < -10dB). After 5 minutes, transitions to half-open (test). Good SNR closes the breaker. FLOOD is never blocked.
+
+| Command | Description |
+|---------|-------------|
+| `cb` | Show count of open circuit breakers |
+
+## Adaptive TX Power
+
+Adjusts TX power based on average neighbour SNR. High SNR (>+10dB) reduces power by 2dBm. Low SNR (<-5dB) increases by 2dBm. Range: 5-14 dBm (EU). Config is RAM-only.
+
+| Command | Description |
+|---------|-------------|
+| `txpower` | Show current TX power and auto status |
+| `txpower auto on` | Enable adaptive TX power (admin) |
+| `txpower auto off` | Disable and restore max power (admin) |
+| `txpower <N>` | Set manual TX power in dBm (admin, disables auto) |
+
 ## Admin
 
 | Command | Description |
@@ -138,6 +167,7 @@ All CLI commands are available remotely via the MeshCore app's encrypted CLI cha
 - `nodes`, `contacts`, `neighbours`, `identity`
 - `time`, `location`, `advert interval`
 - `repeat`, `power`, `health`, `mailbox`
+- `quiet`, `cb`, `txpower`
 - `rssi`, `help`
 
 ### Admin-only commands (read-write)
@@ -149,6 +179,8 @@ All CLI commands are available remotely via the MeshCore app's encrypted CLI cha
 - `mailbox clear`, `ratelimit on/off/reset`, `resetstats`
 - `advert`, `advert interval`, `advert on/off`
 - `ping`, `ping <hash>`, `trace <hash>`
+- `quiet <start> <end>`, `quiet off`
+- `txpower auto on/off`, `txpower <N>`
 - `save`, `reset`, `reboot`
 
 ## Radio Settings (EU868)

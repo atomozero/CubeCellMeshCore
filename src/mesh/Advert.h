@@ -196,8 +196,8 @@ struct AdvertInfo {
     uint8_t pubKeyHash;           // First byte of public key
     uint8_t flags;                // Node flags
     bool hasLocation;             // Has location data
-    float latitude;               // Latitude if present
-    float longitude;              // Longitude if present
+    int32_t latitude;             // Latitude * 1000000 (microdegrees)
+    int32_t longitude;            // Longitude * 1000000 (microdegrees)
     bool hasName;                 // Has name
     char name[MC_NODE_NAME_MAX];  // Node name if present
     bool isRepeater;              // Is repeater node
@@ -421,8 +421,8 @@ private:
                 appdata[pos++] = (lon >> 16) & 0xFF;
                 appdata[pos++] = (lon >> 24) & 0xFF;
 
-                Serial.printf("[DEBUG] ADVERT location: %.6f, %.6f\n\r",
-                              lat / 1000000.0f, lon / 1000000.0f);
+                Serial.printf("[DEBUG] ADVERT location: %ld.%06ld, %ld.%06ld\n\r",
+                              lat/1000000, abs(lat%1000000), lon/1000000, abs(lon%1000000));
             }
 
             // Name
@@ -554,8 +554,8 @@ public:
                                       (payload[pos+2] << 16));
                     int32_t lonInt = (int32_t)(payload[pos+3] | (payload[pos+4] << 8) |
                                       (payload[pos+5] << 16) | (payload[pos+6] << 24));
-                    info->latitude = latInt / 1000000.0f;
-                    info->longitude = lonInt / 1000000.0f;
+                    info->latitude = latInt;
+                    info->longitude = lonInt;
                     pos += 7;
                 } else {
                     // Normal 8-byte location
@@ -563,8 +563,8 @@ public:
                                       (payload[pos+2] << 16) | (payload[pos+3] << 24));
                     int32_t lonInt = (int32_t)(payload[pos+4] | (payload[pos+5] << 8) |
                                       (payload[pos+6] << 16) | (payload[pos+7] << 24));
-                    info->latitude = latInt / 1000000.0f;
-                    info->longitude = lonInt / 1000000.0f;
+                    info->latitude = latInt;
+                    info->longitude = lonInt;
                     pos += 8;
                 }
             }
@@ -605,14 +605,14 @@ public:
                                 (payload[ADVERT_FLAGS_OFFSET + 1] << 8) |
                                 (payload[ADVERT_FLAGS_OFFSET + 2] << 16) |
                                 (payload[ADVERT_FLAGS_OFFSET + 3] << 24);
-                info->latitude = latRaw / 1000000.0f;
+                info->latitude = latRaw;
 
                 // Extract longitude (next 4 bytes, little-endian)
                 int32_t lonRaw = payload[ADVERT_FLAGS_OFFSET + 4] |
                                 (payload[ADVERT_FLAGS_OFFSET + 5] << 8) |
                                 (payload[ADVERT_FLAGS_OFFSET + 6] << 16) |
                                 (payload[ADVERT_FLAGS_OFFSET + 7] << 24);
-                info->longitude = lonRaw / 1000000.0f;
+                info->longitude = lonRaw;
 
                 // Skip the location data (8 bytes) to get to name
                 pos = ADVERT_FLAGS_OFFSET + 8;

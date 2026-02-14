@@ -113,8 +113,7 @@ public:
         int32_t gain = ADC_SAR_Seq_countsPer10Volt[0];
         if (gain != 0) {
             int32_t adj = (int32_t)counts - ADC_SAR_Seq_offset[0];
-            float pinMv = ((float)adj * 10000.0f) / (float)gain;
-            data.batteryMv = (uint16_t)(pinMv * 2.0f);
+            data.batteryMv = (uint16_t)((adj * 20000L) / gain);
         } else {
             data.batteryMv = 0;
         }
