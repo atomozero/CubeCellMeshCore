@@ -220,14 +220,19 @@ Configurazione completa del repeater dall'app MeshCore senza cavo seriale, trami
 
 ## Analisi combinata: tutte e 3 insieme?
 
-### Budget Flash disponibile: 2,792 bytes (post Fase 0)
+### Budget Flash
 
-| Feature | Flash stimata | RAM | EEPROM | Fattibile? |
-|---------|---------------|-----|--------|------------|
-| OTA Config completa | ~500B | 0B | 0B | SI |
-| Health Monitor | ~800B | ~150B | 0-20B | SI |
-| Store-and-Forward | ~1,500B | ~100B | ~168B | STRETTO |
-| **TOTALE** | **~2,800B** | **~250B** | **~170B** | **SI (margine -8B)** |
+| Momento | Flash usata | Libera | Note |
+|---------|-------------|--------|------|
+| Baseline v0.4.0 | 128,728 B | 2,344 B | |
+| Post Fase 0 | 128,280 B | 2,792 B | -448 B recuperati |
+| Post Fase 1 (OTA) | 129,304 B | **1,768 B** | +1,024 B per 15 nuovi comandi |
+
+| Feature | Flash stimata | Flash reale | RAM | EEPROM |
+|---------|---------------|-------------|-----|--------|
+| OTA Config completa | ~500B | **1,024B** | 0B | 0B |
+| Health Monitor | ~800B | TBD | ~150B | 0-20B |
+| Store-and-Forward | ~1,500B | TBD | ~100B | ~168B |
 
 ---
 
@@ -245,11 +250,20 @@ Configurazione completa del repeater dall'app MeshCore senza cavo seriale, trami
 
 **Stato post-Fase 0**: Flash 128,280/131,072 (97.9%) - **2,792 B liberi**
 
-### Fase 1: OTA Config completa (v0.4.1) - Sforzo BASSO
-1. Aggiungere comandi mancanti a `processRemoteCommand()`
-2. Aggiungere paginazione per `nodes` (es. `nodes 0`, `nodes 8`)
-3. Test via simulatore
-4. ~500B Flash, 0 RAM, 0 EEPROM
+## Fase 1: OTA Config completa (COMPLETATA)
+
+### Comandi remote CLI aggiunti
+- `sleep on/off` - gestione deep sleep da remoto
+- `ratelimit on/off/reset` - controllo rate limiting
+- `ratelimit` (read) - statistiche rate limiting
+- `alert on/off/clear` - gestione alert da remoto
+- `alert dest <name>` - impostare destinazione alert
+- `alert` (read) - stato alert
+- `mode 0/1/2` - cambio power mode
+- `power` (read) - stato power/sleep/rxboost
+
+**Costo reale**: 1,024 B Flash, 0 RAM, 0 EEPROM
+**Stato post-Fase 1**: Flash 129,304/131,072 (98.7%) - **1,768 B liberi**
 
 ### Fase 2: Mesh Health Monitor (v0.4.2) - Sforzo MEDIO
 1. Aggiungere campo `snrAvg` a SeenNode (EMA su 8 campioni)

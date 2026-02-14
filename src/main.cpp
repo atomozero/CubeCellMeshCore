@@ -868,6 +868,75 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     else if (strcmp(cmd, "rxboost") == 0) {
         RESP_APPEND("RxB:%s\n", rxBoostEnabled ? "ON" : "OFF");
     }
+    else if (strcmp(cmd, "sleep on") == 0) {
+        deepSleepEnabled = true; saveConfig();
+        RESP_APPEND("sleep:on\n");
+    }
+    else if (strcmp(cmd, "sleep off") == 0) {
+        deepSleepEnabled = false; saveConfig();
+        RESP_APPEND("sleep:off\n");
+    }
+    else if (strcmp(cmd, "sleep") == 0) {
+        RESP_APPEND("sleep:%s\n", deepSleepEnabled ? "on" : "off");
+    }
+    else if (strcmp(cmd, "ratelimit on") == 0) {
+        repeaterHelper.setRateLimitEnabled(true);
+        RESP_APPEND("RL:on\n");
+    }
+    else if (strcmp(cmd, "ratelimit off") == 0) {
+        repeaterHelper.setRateLimitEnabled(false);
+        RESP_APPEND("RL:off\n");
+    }
+    else if (strcmp(cmd, "ratelimit reset") == 0) {
+        repeaterHelper.resetRateLimitStats();
+        RESP_APPEND("RL reset\n");
+    }
+    else if (strcmp(cmd, "ratelimit") == 0) {
+        RESP_APPEND("RL:%s L:%lu R:%lu F:%lu\n",
+            repeaterHelper.isRateLimitEnabled() ? "on" : "off",
+            repeaterHelper.getLoginLimiter().getTotalBlocked(),
+            repeaterHelper.getRequestLimiter().getTotalBlocked(),
+            repeaterHelper.getForwardLimiter().getTotalBlocked());
+    }
+    else if (strcmp(cmd, "alert on") == 0) {
+        if (isPubKeySet(alertDestPubKey)) {
+            alertEnabled = true; saveConfig();
+            RESP_APPEND("alert:on\n");
+        } else RESP_APPEND("E:no dest\n");
+    }
+    else if (strcmp(cmd, "alert off") == 0) {
+        alertEnabled = false; saveConfig();
+        RESP_APPEND("alert:off\n");
+    }
+    else if (strcmp(cmd, "alert clear") == 0) {
+        memset(alertDestPubKey, 0, REPORT_PUBKEY_SIZE);
+        alertEnabled = false; saveConfig();
+        RESP_APPEND("alert clr\n");
+    }
+    else if (strncmp(cmd, "alert dest ", 11) == 0) {
+        Contact* c = contactMgr.findByName(cmd + 11);
+        if (c) {
+            memcpy(alertDestPubKey, c->pubKey, REPORT_PUBKEY_SIZE);
+            saveConfig();
+            RESP_APPEND("alert->%s\n", c->name);
+        } else RESP_APPEND("E:not found\n");
+    }
+    else if (strcmp(cmd, "alert") == 0) {
+        RESP_APPEND("alert:%s dest:%s\n",
+            alertEnabled ? "on" : "off",
+            isPubKeySet(alertDestPubKey) ? "set" : "none");
+    }
+    else if (strncmp(cmd, "mode ", 5) == 0) {
+        char m = cmd[5];
+        if (m >= '0' && m <= '2') {
+            powerSaveMode = m - '0'; saveConfig();
+            RESP_APPEND("mode:%c\n", m);
+        } else RESP_APPEND("E:0-2\n");
+    }
+    else if (strcmp(cmd, "power") == 0) {
+        RESP_APPEND("M:%d RxB:%s DS:%s\n", powerSaveMode,
+            rxBoostEnabled ? "on" : "off", deepSleepEnabled ? "on" : "off");
+    }
     else if (strcmp(cmd, "save") == 0) {
         saveConfig();
         RESP_APPEND("saved\n");
@@ -921,9 +990,9 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     }
 #endif
     else if (strcmp(cmd, "help") == 0) {
-        RESP_APPEND("status stats time nodes identity\n");
-        RESP_APPEND("telemetry radio location\n");
-        RESP_APPEND("ping rxboost advert save reboot");
+        RESP_APPEND("status stats time nodes identity telemetry\n");
+        RESP_APPEND("radio location ping rxboost sleep alert\n");
+        RESP_APPEND("ratelimit mode power advert save reboot");
     }
     else {
         RESP_APPEND("E:?\n");
