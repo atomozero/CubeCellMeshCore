@@ -10,12 +10,14 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from sim.clock import VirtualClock
-from sim.node import SimRepeater
+from sim.node import SimRepeater, SimCompanion
 from sim.packet import (
     MCPacket, MC_ROUTE_FLOOD, MC_ROUTE_DIRECT, MC_PAYLOAD_REQUEST,
-    MC_PAYLOAD_RESPONSE, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1,
-    MC_MAX_PATH_SIZE,
+    MC_PAYLOAD_RESPONSE, MC_PAYLOAD_PLAIN, MC_PAYLOAD_ADVERT,
+    MC_PAYLOAD_VER_1, MC_MAX_PATH_SIZE,
 )
+from sim.identity import Identity
+from sim.advert import build_advert, TimeSync
 
 
 def make_repeater(name="RPT"):
@@ -200,3 +202,94 @@ class TestDirectRoutingMultiHop:
         assert rpt.tx_queue.count > 0
         fwd2 = rpt.tx_queue.pop()
         assert fwd2.path == [0xBB]  # peeled, next hop is 0xBB
+
+
+class TestAdvertForwarding:
+    """Test that ADVERT packets are forwarded by the repeater."""
+
+    def _make_advert_from(self, name="CompA"):
+        """Build a real ADVERT from a companion identity."""
+        ident = Identity(name)
+        clock = VirtualClock()
+        ts = TimeSync(clock)
+        ts.set_time(1700000000)
+        return build_advert(ident, ts), ident
+
+    def test_flood_advert_forwarded(self):
+        """FLOOD ADVERT should be processed AND forwarded."""
+        rpt = make_repeater("RPT_ADV1")
+        adv, src_ident = self._make_advert_from("Companion1")
+        assert adv.route_type == MC_ROUTE_FLOOD
+        rpt.on_rx_packet(adv, rssi=-80, snr=20)
+        # Should be forwarded
+        assert rpt.tx_queue.count > 0
+        fwd = rpt.tx_queue.pop()
+        assert fwd.payload_type == MC_PAYLOAD_ADVERT
+        assert rpt.identity.hash in fwd.path  # our hash appended
+
+    def test_advert_forwarded_with_path_buildup(self):
+        """Forwarded ADVERT should have repeater hash added to path."""
+        rpt = make_repeater("RPT_ADV2")
+        adv, _ = self._make_advert_from("Companion2")
+        adv.path = [0xBB]  # already passed through another node
+        rpt.on_rx_packet(adv, rssi=-80, snr=20)
+        assert rpt.tx_queue.count > 0
+        fwd = rpt.tx_queue.pop()
+        assert fwd.path == [0xBB, rpt.identity.hash]
+
+    def test_advert_not_forwarded_if_duplicate(self):
+        """Same ADVERT received twice should be forwarded only once."""
+        rpt = make_repeater("RPT_ADV3")
+        adv1, _ = self._make_advert_from("Companion3")
+        adv2 = adv1.copy()
+        rpt.on_rx_packet(adv1, rssi=-80, snr=20)
+        assert rpt.tx_queue.count == 1
+        rpt.tx_queue.pop()
+        rpt.on_rx_packet(adv2, rssi=-80, snr=20)
+        assert rpt.tx_queue.count == 0  # dedup blocks second
+
+    def test_advert_seen_nodes_updated_and_forwarded(self):
+        """ADVERT should update seen nodes AND be forwarded (both happen)."""
+        rpt = make_repeater("RPT_ADV4")
+        adv, src_ident = self._make_advert_from("TestNode")
+        rpt.on_rx_packet(adv, rssi=-75, snr=24)
+        # Seen nodes updated (hash tracked from ADVERT pubkey)
+        sn = rpt.seen_nodes.get_by_hash(src_ident.hash)
+        assert sn is not None
+        # Also forwarded
+        assert rpt.stats.fwd_count == 1
+
+    def test_direct_advert_not_forwarded_without_our_hash(self):
+        """DIRECT ADVERT where we're not next hop should NOT be forwarded."""
+        rpt = make_repeater("RPT_ADV5")
+        adv, _ = self._make_advert_from("Companion5")
+        adv.set_header(MC_ROUTE_DIRECT, MC_PAYLOAD_ADVERT, 0)
+        adv.path = [0xFF]  # not our hash
+        rpt.on_rx_packet(adv, rssi=-80, snr=20)
+        assert rpt.tx_queue.count == 0
+
+    def test_advert_forwarded_through_two_repeaters(self):
+        """ADVERT should propagate through multiple repeaters."""
+        rpt1 = make_repeater("RPT_R1")
+        rpt2 = make_repeater("RPT_R2")
+        adv, _ = self._make_advert_from("FarNode")
+
+        # RPT1 receives and forwards
+        rpt1.on_rx_packet(adv, rssi=-90, snr=10)
+        assert rpt1.tx_queue.count > 0
+        fwd1 = rpt1.tx_queue.pop()
+        assert fwd1.path == [rpt1.identity.hash]
+
+        # RPT2 receives the forwarded ADVERT
+        rpt2.on_rx_packet(fwd1, rssi=-85, snr=15)
+        assert rpt2.tx_queue.count > 0
+        fwd2 = rpt2.tx_queue.pop()
+        assert fwd2.path == [rpt1.identity.hash, rpt2.identity.hash]
+
+    def test_advert_loop_prevention(self):
+        """ADVERT with our hash already in path should NOT be forwarded."""
+        rpt = make_repeater("RPT_ADV6")
+        adv, _ = self._make_advert_from("LoopNode")
+        adv.path = [0xBB, rpt.identity.hash]  # we're already in path
+        rpt.on_rx_packet(adv, rssi=-80, snr=20)
+        assert rpt.tx_queue.count == 0
