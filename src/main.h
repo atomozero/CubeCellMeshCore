@@ -8,7 +8,7 @@
  * Based on MeshCore protocol: https://github.com/meshcore-dev/MeshCore
  */
 
-#define FIRMWARE_VERSION    "0.4.0"
+#define FIRMWARE_VERSION    "0.5.0"
 
 //=============================================================================
 // Configuration
@@ -287,7 +287,7 @@ extern const NodeConfig defaultConfig;
 #define STATS_EEPROM_OFFSET     280     // After Identity (~260 bytes)
 #define STATS_EEPROM_MAGIC      0x5754  // "ST" for stats
 #define STATS_EEPROM_VERSION    1
-#define STATS_SAVE_INTERVAL_MS  300000  // Auto-save every 5 minutes
+#define STATS_SAVE_INTERVAL_MS  1800000 // Auto-save every 30 minutes
 
 #ifndef PERSISTENTSTATS_DEFINED
 #define PERSISTENTSTATS_DEFINED
@@ -391,9 +391,10 @@ void processCommand(char* cmd);
 
 // Configuration - see core/Config.h
 
-// Ping / Test
+// Ping / Test / Trace
 void sendPing();
 void sendDirectedPing(uint8_t targetHash);
+void sendDirectedTrace(uint8_t targetHash);
 uint32_t getPacketId(MCPacket* pkt);
 
 // ADVERT
