@@ -17,7 +17,7 @@ Serial console at 115200 baud.
 | `nodes` | Discovered nodes (hash, name, RSSI, last seen date/time) |
 | `contacts` | Known contacts with public keys |
 | `neighbours` | Direct repeater neighbours (0-hop) |
-| `health` | Mesh health: node count, offline nodes, SNR trends |
+| `health` | System dashboard: uptime, battery, network, mailbox, alerts |
 | `mailbox` | Store-and-forward mailbox status (slots, E/R, age) |
 
 ## Configuration

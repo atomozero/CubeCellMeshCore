@@ -361,7 +361,30 @@ Questo meccanismo e' usato sia da `healthCheck()` che da `alert test`.
 **Costo**: +96 B Flash (dedup) +56 B (session) -16 B (CLI fix)
 **Stato post-Fase 3.1**: Flash 119,348/131,072 (91.1%) - **11,724 B liberi**
 
-### Ordine completato: Fase 0 -> 1 -> 2 -> 2.5 -> 3 -> 3.1
+## Fase 3.2: DIRECT routing e Health dashboard (COMPLETATA)
+
+**DIRECT routing** - Bug critico: il repeater inoltrava solo pacchetti FLOOD, scartando
+i pacchetti DIRECT. MeshCore dopo la scoperta via FLOOD usa DIRECT per i messaggi
+successivi (path invertito). I messaggi tra companion tramite il repeater venivano persi.
+
+Correzioni:
+- `shouldForward()`: supporta FLOOD e DIRECT
+  - FLOOD: append hash al path + loop prevention (hash gia' nel path)
+  - DIRECT: controlla path[0] == nostro hash (siamo il prossimo hop)
+- Forwarding: FLOOD appende, DIRECT rimuove path[0] (peel)
+- Fix path hash: ora usa `publicKey[0]` (corretto) invece di `nodeId XOR`
+
+**Health dashboard** - Differenziato da `nodes`:
+- Riga 1: uptime, batteria, sync
+- Riga 2: nodi totali/online/offline, alert
+- Riga 3: mailbox, rate limit blocked, errori
+- Righe 4+: solo nodi problematici (offline o SNR degradato)
+
+**Simulatore**: 15 test DIRECT routing (should_forward, path peeling, multi-hop)
+
+**Stato post-Fase 3.2**: In attesa di compilazione (stima ~+200 B Flash)
+
+### Ordine completato: Fase 0 -> 1 -> 2 -> 2.5 -> 3 -> 3.1 -> 3.2
 Tutte le feature pianificate sono state implementate.
 
 ---
@@ -377,10 +400,11 @@ Tutte le feature pianificate sono state implementate.
 | Fase 2.5 (Ottimiz) | -12,916 B | -368 B | 0 | Merge CLI, no float |
 | Fase 3 (Mailbox) | +1,752 B | +512 B | 172 B | 2 EEPROM + 4 RAM slots |
 | Fase 3.1 (Fix+Dedup) | +136 B | 0 | 0 | Session expiry, dedup, CLI fix |
-| **Totale** | **-9,332 B** | **-312 B** | **+172 B** | |
-| **Finale** | **119,348 B (91.1%)** | **7,848 B (47.9%)** | **512/512** | |
+| Fase 3.2 (DIRECT+Health) | ~+200 B | 0 | 0 | DIRECT routing, health dashboard, loop prevention |
+| **Totale** | **~-9,132 B** | **-312 B** | **+172 B** | |
+| **Finale (stimato)** | **~119,548 B (91.2%)** | **7,848 B (47.9%)** | **512/512** | |
 
-**Margine residuo**: 11,724 B Flash liberi, 8,536 B RAM liberi
+**Margine residuo**: ~11,524 B Flash liberi, 8,536 B RAM liberi
 
 ---
 
