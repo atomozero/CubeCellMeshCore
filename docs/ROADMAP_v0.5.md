@@ -343,18 +343,23 @@ Questo meccanismo e' usato sia da `healthCheck()` che da `alert test`.
 - Se nessun slot libero, sovrascrive il piu' vecchio
 - Magic number 0xBB0F per protezione corruzione
 - I pacchetti vengono salvati raw (cifrati) - il repeater non li decifra
+- **Dedup**: confronto raw dei dati serializzati prima dello store, previene duplicati da repeater multipli
 - CLI mostra `Mbox:2/6 E:1 R:1` e prefisso `E0`/`R3` per ogni slot
 
 **Costo reale**: 1,752 B Flash, 512 B RAM (328B per 4 slot RAM), 172 B EEPROM
 **Stato post-Fase 3**: Flash 119,196/131,072 (90.9%) - **11,876 B liberi**
 
-## Fase 3.1: Security fix (COMPLETATA)
+## Fase 3.1: Security fix e bugfix (COMPLETATA)
 
 - **Session cleanup**: `sessionManager.cleanupSessions()` nel loop 60s
   - Le sessioni inattive >1 ora vengono cancellate (prima non scadevano mai)
+- **Mailbox dedup**: `isDuplicate()` confronta dati raw prima dello store
+  - Lo stesso pacchetto ricevuto da repeater diversi non occupa piu' slot multipli
+- **Fix CLI**: `rssi` e `acl` spostati nel dispatcher condiviso (erano irraggiungibili)
+- **Fix nodes**: rimosso filtro `lastSeen>0`, aggiunto SNR e pkt count all'output
 
-**Costo**: +56 B Flash
-**Stato post-Fase 3.1**: Flash 119,252/131,072 (91.0%) - **11,820 B liberi**
+**Costo**: +96 B Flash (dedup) +56 B (session) -16 B (CLI fix)
+**Stato post-Fase 3.1**: Flash 119,348/131,072 (91.1%) - **11,724 B liberi**
 
 ### Ordine completato: Fase 0 -> 1 -> 2 -> 2.5 -> 3 -> 3.1
 Tutte le feature pianificate sono state implementate.
@@ -371,11 +376,11 @@ Tutte le feature pianificate sono state implementate.
 | Fase 2 (Health) | +1,120 B | +64 B | 0 | SNR EMA, alert chat node |
 | Fase 2.5 (Ottimiz) | -12,916 B | -368 B | 0 | Merge CLI, no float |
 | Fase 3 (Mailbox) | +1,752 B | +512 B | 172 B | 2 EEPROM + 4 RAM slots |
-| Fase 3.1 (Security) | +56 B | 0 | 0 | Session expiry |
-| **Totale** | **-9,412 B** | **-312 B** | **+172 B** | |
-| **Finale** | **119,252 B (91.0%)** | **7,848 B (47.9%)** | **512/512** | |
+| Fase 3.1 (Fix+Dedup) | +136 B | 0 | 0 | Session expiry, dedup, CLI fix |
+| **Totale** | **-9,332 B** | **-312 B** | **+172 B** | |
+| **Finale** | **119,348 B (91.1%)** | **7,848 B (47.9%)** | **512/512** | |
 
-**Margine residuo**: 11,820 B Flash liberi, 8,536 B RAM liberi
+**Margine residuo**: 11,724 B Flash liberi, 8,536 B RAM liberi
 
 ---
 
