@@ -145,16 +145,16 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
         CP("Nodes:%d\n", count);
         for (uint8_t i = 0; i < count; i++) {
             const SeenNode* n = seenNodes.getNode(i);
-            if (n && n->lastSeen > 0) {
+            if (n) {
                 if (ctx.buf && ctx.len >= ctx.maxLen - 48) break;
                 uint32_t ago = (millis() - n->lastSeen) / 1000;
                 if (timeSync.isSynchronized()) {
                     uint32_t ts = timeSync.getTimestamp() - ago;
                     TimeSync::DateTime dt;
                     TimeSync::timestampToDateTime(ts, dt);
-                    CP("%02X %s %ddBm %02d/%02d/%02d %02d:%02d\n", n->hash, n->name[0]?n->name:"-", n->lastRssi, dt.day, dt.month, dt.year % 100, dt.hour, dt.minute);
+                    CP("%02X %s %ddBm s:%d p:%d %02d/%02d %02d:%02d\n", n->hash, n->name[0]?n->name:"-", n->lastRssi, n->lastSnr, n->pktCount, dt.day, dt.month, dt.hour, dt.minute);
                 } else {
-                    CP("%02X %s %ddBm %lus\n", n->hash, n->name[0]?n->name:"-", n->lastRssi, ago);
+                    CP("%02X %s %ddBm s:%d p:%d %lus\n", n->hash, n->name[0]?n->name:"-", n->lastRssi, n->lastSnr, n->pktCount, ago);
                 }
             }
         }
@@ -278,6 +278,15 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
     }
     else if (strcmp(cmd, "rxboost") == 0) {
         CP("RxB:%s\n", rxBoostEnabled ? "on" : "off");
+    }
+    else if (strcmp(cmd, "rssi") == 0) {
+        CP("RSSI:%d SNR:%d.%02ddB\n", lastRssi, lastSnr/4, abs(lastSnr%4)*25);
+    }
+    else if (strcmp(cmd, "acl") == 0) {
+        CP("Admin:%s Guest:%s S:%d\n",
+            sessionManager.getAdminPassword(),
+            strlen(sessionManager.getGuestPassword()) > 0 ? sessionManager.getGuestPassword() : "(off)",
+            sessionManager.getSessionCount());
     }
     // --- Admin-only commands ---
     else if (!isAdmin) {
@@ -552,15 +561,6 @@ void processCommand(char* cmd) {
         uint32_t ts = strtoul(cmd + 5, NULL, 10);
         if (ts > 1577836800) { timeSync.setTime(ts); LOG_RAW("Time set: %lu\n\r", ts); }
         else LOG_RAW("Invalid timestamp\n\r");
-    }
-    else if (strcmp(cmd, "acl") == 0) {
-        LOG_RAW("Admin:%s Guest:%s Sessions:%d\n\r",
-            sessionManager.getAdminPassword(),
-            strlen(sessionManager.getGuestPassword()) > 0 ? sessionManager.getGuestPassword() : "(off)",
-            sessionManager.getSessionCount());
-    }
-    else if (strcmp(cmd, "rssi") == 0) {
-        LOG_RAW("RSSI:%d SNR:%d.%02ddB\n\r", lastRssi, lastSnr/4, abs(lastSnr%4)*25);
     }
     else if (strcmp(cmd, "alert test") == 0) {
         if (sendAlertAsChatNode("Test alert")) LOG_RAW("Test alert sent\n\r");
