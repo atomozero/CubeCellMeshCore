@@ -2800,6 +2800,7 @@ void loop() {
         if (millis() - lastCleanup > 60000) {
             repeaterHelper.cleanup();
             healthCheck();
+            sessionManager.cleanupSessions();  // Expire idle sessions (1h)
             if (timeSync.isSynchronized()) {
                 mailbox.expireOld(timeSync.getTimestamp());
             }
