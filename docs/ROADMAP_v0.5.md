@@ -231,7 +231,7 @@ Configurazione completa del repeater dall'app MeshCore senza cavo seriale, trami
 | Feature | Flash stimata | Flash reale | RAM | EEPROM |
 |---------|---------------|-------------|-----|--------|
 | OTA Config completa | ~500B | **1,024B** | 0B | 0B |
-| Health Monitor | ~800B | **936B** | 64B | 0B |
+| Health Monitor | ~800B | **1,120B** | 64B | 0B |
 | Store-and-Forward | ~1,500B | TBD | ~100B | ~168B |
 
 ---
@@ -275,8 +275,18 @@ Configurazione completa del repeater dall'app MeshCore senza cavo seriale, trami
 - Comando `health` disponibile sia via serial che via remote CLI
 - Output: conteggio nodi, offline, SNR corrente vs media, tempo dall'ultimo pacchetto
 
-**Costo reale**: 936 B Flash, 64 B RAM, 0 EEPROM
-**Stato post-Fase 2**: Flash 130,240/131,072 (99.4%) - **832 B liberi**
+### Alert tramite chat node impersonation
+Il client MeshCore ignora i messaggi ricevuti da nodi di tipo repeater.
+Soluzione: prima di inviare un alert, il repeater:
+1. Cambia temporaneamente i flags a CHAT_NODE (0x81)
+2. Invia un ADVERT flood (l'app lo registra come contatto)
+3. Invia il messaggio cifrato (l'app lo mostra come messaggio normale)
+4. Torna a REPEATER al prossimo ADVERT schedulato
+
+Questo meccanismo e' usato sia da `healthCheck()` che da `alert test`.
+
+**Costo reale**: 1,120 B Flash (+184B per chat node trick), 64 B RAM, 0 EEPROM
+**Stato post-Fase 2**: Flash 130,360/131,072 (99.5%) - **712 B liberi**
 
 ### Fase 3: Store-and-Forward Mailbox (v0.5.0) - Sforzo ALTO
 1. Struttura `MailboxEntry` in EEPROM (offset 340, 2 slot)

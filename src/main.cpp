@@ -18,6 +18,7 @@ void sendDirectMessage(const char* recipientName, const char* message);
 bool transmitPacket(MCPacket* pkt);
 void startReceive();
 bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int16_t rssi);
+bool sendAlertAsChatNode(const char* text);
 uint32_t getPacketId(MCPacket* pkt);
 
 // Health monitor thresholds
@@ -426,7 +427,7 @@ void processCommand(char* cmd) {
         LOG_RAW("Alert cleared\n\r");
     }
     else if (strcmp(cmd, "alert test") == 0) {
-        if (sendNodeAlert("TestNode", 0xAA, 1, -50)) {
+        if (sendAlertAsChatNode("Test alert")) {
             LOG_RAW("Test alert sent\n\r");
         } else {
             LOG_RAW("Alert not set\n\r");
@@ -1831,18 +1832,50 @@ bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int
 }
 
 //=============================================================================
-// Mesh Health Monitor (passive - no TX, diagnostic only)
+// Mesh Health Monitor
 //=============================================================================
+
+/**
+ * Send alert by temporarily becoming a chat node.
+ * MeshCore app ignores messages from repeaters, so we:
+ * 1. Switch flags to CHAT_NODE, send ADVERT (app registers us as contact)
+ * 2. Send the encrypted message (app shows it)
+ * 3. Switch back to REPEATER at next scheduled ADVERT
+ */
+bool sendAlertAsChatNode(const char* text) {
+    if (!isPubKeySet(alertDestPubKey) || !timeSync.isSynchronized()) return false;
+
+    // Save original flags and switch to chat node
+    uint8_t origFlags = nodeIdentity.getFlags();
+    nodeIdentity.setFlags((origFlags & 0xF0) | MC_TYPE_CHAT_NODE);
+
+    // Send ADVERT as chat node so app registers us
+    sendAdvert(true);
+
+    // Send the actual message
+    bool ok = sendEncryptedToAdmin(alertDestPubKey, text, strlen(text));
+
+    // Restore repeater flags (next scheduled ADVERT will broadcast as repeater)
+    nodeIdentity.setFlags(origFlags);
+
+    LOG(TAG_INFO " Alert%s: %s\n\r", ok ? "" : " FAIL", text);
+    return ok;
+}
+
 void healthCheck() {
+    if (!alertEnabled || !isPubKeySet(alertDestPubKey)) return;
+
     uint32_t now = millis();
     for (uint8_t i = 0; i < seenNodes.getCount(); i++) {
         const SeenNode* n = seenNodes.getNode(i);
         if (!n || n->lastSeen == 0 || n->pktCount < 3) continue;
 
-        // Mark offline nodes (flag used by 'health' command display)
         if ((now - n->lastSeen) > HEALTH_OFFLINE_MS && !n->offlineAlerted) {
             ((SeenNode*)n)->offlineAlerted = true;
-            LOG(TAG_NODE " %02X %s offline\n\r", n->hash, n->name[0] ? n->name : "?");
+            char msg[40];
+            snprintf(msg, sizeof(msg), "%02X %s off %lum",
+                n->hash, n->name[0] ? n->name : "?", (now - n->lastSeen) / 60000);
+            sendAlertAsChatNode(msg);
         }
     }
 }
