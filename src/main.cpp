@@ -246,6 +246,16 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
             }
         }
     }
+    else if (strcmp(cmd, "mailbox") == 0) {
+        CP("Mbox:%d/%d\n", mailbox.getCount(), mailbox.getSlots());
+        for (uint8_t i = 0; i < mailbox.getSlots(); i++) {
+            const MailboxSlot* s = mailbox.getSlot(i);
+            if (s && s->pktLen > 0) {
+                uint32_t age = timeSync.isSynchronized() ? (timeSync.getTimestamp() - s->timestamp) : 0;
+                CP(" %d: dest=%02X %dB %lus\n", i, s->destHash, s->pktLen, age);
+            }
+        }
+    }
     else if (strcmp(cmd, "power") == 0) {
         CP("M:%d RxB:%s DS:%s\n", powerSaveMode,
             rxBoostEnabled ? "on" : "off", deepSleepEnabled ? "on" : "off");
@@ -392,6 +402,9 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
         if (m >= '0' && m <= '2') { powerSaveMode = m - '0'; saveConfig(); CP("mode:%c\n", m); }
         else CP("E:0-2\n");
     }
+    else if (strcmp(cmd, "mailbox clear") == 0) {
+        mailbox.clear(); CP("mbox clr\n");
+    }
     else if (strcmp(cmd, "save") == 0) {
         saveConfig(); CP("saved\n");
     }
@@ -435,7 +448,7 @@ void processCommand(char* cmd) {
                 "neighbours telemetry identity name location time nodetype passwd\n\r"
                 "sleep rxboost radio tempradio ratelimit savestats alert newid\n\r"
                 "power acl repeat ping trace rssi mode set report health\n\r"
-                "reset save reboot\n\r");
+                "mailbox reset save reboot\n\r");
     }
     else if (strcmp(cmd, "newid") == 0) {
         LOG_RAW("Gen new ID...\n\r");
@@ -768,7 +781,7 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     else if (strcmp(cmd, "help") == 0) {
         RESP_APPEND("status stats time nodes identity telemetry\n");
         RESP_APPEND("radio location ping rxboost sleep alert\n");
-        RESP_APPEND("ratelimit mode power advert save reboot");
+        RESP_APPEND("ratelimit mode power mailbox advert save reboot");
     }
     else {
         RESP_APPEND("E:?\n");
@@ -2489,6 +2502,15 @@ void processReceivedPacket(MCPacket* pkt) {
             const uint8_t* pubKey = &pkt->payload[ADVERT_PUBKEY_OFFSET];
             contactMgr.updateFromAdvert(pubKey, advInfo.name, pkt->rssi, pkt->snr);
 
+            // Store-and-forward: deliver pending messages for this node
+            if (mailbox.countFor(advInfo.pubKeyHash) > 0) {
+                MCPacket fwdPkt;
+                while (mailbox.popFor(advInfo.pubKeyHash, &fwdPkt)) {
+                    txQueue.add(&fwdPkt);
+                    LOG(TAG_INFO " Mbox fwd %02X\n\r", advInfo.pubKeyHash);
+                }
+            }
+
             // If this is a repeater AND received directly (0-hop), add to neighbours list
             // Only 0-hop ADVERTs indicate direct neighbours (no relay)
             if (advInfo.isRepeater && pkt->pathLen == 0 && pkt->payloadLen >= 32) {
@@ -2532,6 +2554,34 @@ void processReceivedPacket(MCPacket* pkt) {
         }
     }
 
+    // Store-and-forward: save packets for offline nodes
+    {
+        uint8_t pt = pkt->header.getPayloadType();
+        // Only for packet types that have dest_hash at payload[0]
+        if (pkt->payloadLen >= 2 &&
+            (pt == MC_PAYLOAD_REQUEST || pt == MC_PAYLOAD_RESPONSE ||
+             pt == MC_PAYLOAD_PLAIN || pt == MC_PAYLOAD_ANON_REQ)) {
+            uint8_t destHash = pkt->payload[0];
+            // Not for us (already handled), not broadcast (hash 0)
+            if (destHash != nodeIdentity.getNodeHash() && destHash != 0) {
+                // Check if dest node is known but offline
+                for (uint8_t i = 0; i < seenNodes.getCount(); i++) {
+                    const SeenNode* sn = seenNodes.getNode(i);
+                    if (sn && sn->hash == destHash && sn->pktCount >= 2 &&
+                        (millis() - sn->lastSeen) > HEALTH_OFFLINE_MS) {
+                        // Node is offline - store if we have time
+                        if (timeSync.isSynchronized()) {
+                            if (mailbox.store(destHash, pkt, timeSync.getTimestamp())) {
+                                LOG(TAG_INFO " Mbox store %02X\n\r", destHash);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     // Check if we should forward
     if (shouldForward(pkt)) {
         // Rate limit forwarding
@@ -2569,6 +2619,9 @@ void setup() {
 
     // Load persistent statistics
     loadPersistentStats();
+
+    // Load store-and-forward mailbox
+    mailbox.load();
 
     // Enable watchdog
 #if MC_WATCHDOG_ENABLED && defined(CUBECELL)
@@ -2739,12 +2792,15 @@ void loop() {
         telemetry.update();
     }
 
-    // Periodic cleanup and health check (every 60 seconds)
+    // Periodic cleanup, health check, and mailbox TTL (every 60 seconds)
     {
         static uint32_t lastCleanup = 0;
         if (millis() - lastCleanup > 60000) {
             repeaterHelper.cleanup();
             healthCheck();
+            if (timeSync.isSynchronized()) {
+                mailbox.expireOld(timeSync.getTimestamp());
+            }
             lastCleanup = millis();
         }
     }

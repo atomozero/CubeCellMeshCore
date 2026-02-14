@@ -262,6 +262,7 @@ SessionManager sessionManager;
 MeshCrypto meshCrypto;
 ContactManager contactMgr;
 MessageCrypto msgCrypto;
+Mailbox mailbox;
 
 //=============================================================================
 // ISR callback

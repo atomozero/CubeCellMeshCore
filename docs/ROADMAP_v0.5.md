@@ -319,30 +319,49 @@ Questo meccanismo e' usato sia da `healthCheck()` che da `alert test`.
 
 **Stato post-Fase 2.5**: Flash 117,444/131,072 (89.6%) - **13,628 B liberi**
 
-### Fase 3: Store-and-Forward Mailbox (v0.5.0)
-1. Struttura `MailboxEntry` in EEPROM (offset 340, 2 slot)
-2. Hook in `processReceivedPacket`: se dest offline, salva
-3. Hook in ADVERT RX / pacchetto RX: se mittente torna, consegna
-4. Comandi: `mailbox` (stato), `mailbox clear`
-5. TTL 24h, auto-cleanup
-6. ~1,500B Flash, 100B RAM, 168B EEPROM
-7. **Budget: 13,628 B liberi - ampio margine**
+## Fase 3: Store-and-Forward Mailbox (COMPLETATA)
 
-### Ordine: Fase 0 -> 1 -> 2 -> 2.5 -> 3
-- Ogni fase e' indipendente e rilasciabile
-- Fase 2.5 ha liberato spazio massiccio, Fase 3 ora fattibile senza compromessi
+### Implementazione
+- **Mailbox.h**: classe `Mailbox` con 2 slot in EEPROM (offset 340, 172 bytes)
+- **EEPROM layout**: Header(8B) + 2 x MailboxSlot(82B) = 172B
+  - MailboxSlot: destHash(1B) + timestamp(4B) + pktLen(1B) + pktData(76B)
+- **Store**: in `processReceivedPacket`, prima del forward
+  - Solo per pacchetti con dest_hash (REQUEST, RESPONSE, PLAIN, ANON_REQ)
+  - Solo se il dest e' un nodo conosciuto ma offline (>30min, almeno 2 pkt visti)
+  - Richiede time sync per timestamp TTL
+- **Forward**: nell'handler ADVERT, dopo `seenNodes.update`
+  - Quando un nodo torna online, tutti i messaggi pendenti vengono accodati in txQueue
+- **TTL**: 24h, cleanup ogni 60s nel loop periodico
+- **Comandi**: `mailbox` (stato) e `mailbox clear` (admin) in dispatchSharedCommand
+
+### Dettagli tecnici
+- Max packet serializzato per slot: 76 bytes
+  - Header(1) + pathLen(1) + path(~4) + payload(~70) = tipico ~76B
+  - Sufficiente per messaggi MeshCore standard
+- Se nessun slot libero, sovrascrive il piu' vecchio
+- Magic number 0xBB0F per protezione corruzione
+- I pacchetti vengono salvati raw (cifrati) - il repeater non li decifra
+
+**Costo reale**: 1,304 B Flash, 184 B RAM, 172 B EEPROM
+**Stato post-Fase 3**: Flash 118,748/131,072 (90.6%) - **12,324 B liberi**
+
+### Ordine completato: Fase 0 -> 1 -> 2 -> 2.5 -> 3
+Tutte le feature pianificate sono state implementate.
 
 ---
 
-## Rischi principali
+## Riepilogo risorse finali
 
-| Rischio | Probabilita' | Mitigazione |
-|---------|--------------|-------------|
-| Flash insufficiente per fase 3 | MEDIA | Misurare dopo fase 2; usare #ifdef |
-| False positive health monitor | ALTA | Soglie conservative, cooldown 30min |
-| Mailbox EEPROM corruption | BASSA | Magic number + CRC (come PersistentStats) |
-| Overflow buffer response 96B | MEDIA | Troncamento gia' gestito; paginazione |
-| Messaggi mailbox non cifrati in EEPROM | BASSA | Accettabile: EEPROM non accessibile da remoto |
+| Fase | Flash | RAM | EEPROM | Note |
+|------|-------|-----|--------|------|
+| Baseline v0.4.0 | 128,728 B | 8,136 B | 340/512 | |
+| Fase 0 (cleanup) | -448 B | -520 B | 0 | PacketLogger ifdef, helpers |
+| Fase 1 (OTA CLI) | +1,024 B | 0 | 0 | 15 nuovi comandi remote |
+| Fase 2 (Health) | +1,120 B | +64 B | 0 | SNR EMA, alert chat node |
+| Fase 2.5 (Ottimiz) | -12,916 B | -368 B | 0 | Merge CLI, no float |
+| Fase 3 (Mailbox) | +1,304 B | +184 B | 172 B | Store-and-forward |
+| **Totale** | **-9,916 B** | **-640 B** | **+172 B** | |
+| **Finale** | **118,748 B (90.6%)** | **7,496 B (45.8%)** | **512/512** | |
 
 ---
 
