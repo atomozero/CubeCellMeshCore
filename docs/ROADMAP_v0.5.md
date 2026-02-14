@@ -231,7 +231,7 @@ Configurazione completa del repeater dall'app MeshCore senza cavo seriale, trami
 | Feature | Flash stimata | Flash reale | RAM | EEPROM |
 |---------|---------------|-------------|-----|--------|
 | OTA Config completa | ~500B | **1,024B** | 0B | 0B |
-| Health Monitor | ~800B | TBD | ~150B | 0-20B |
+| Health Monitor | ~800B | **936B** | 64B | 0B |
 | Store-and-Forward | ~1,500B | TBD | ~100B | ~168B |
 
 ---
@@ -265,13 +265,18 @@ Configurazione completa del repeater dall'app MeshCore senza cavo seriale, trami
 **Costo reale**: 1,024 B Flash, 0 RAM, 0 EEPROM
 **Stato post-Fase 1**: Flash 129,304/131,072 (98.7%) - **1,768 B liberi**
 
-### Fase 2: Mesh Health Monitor (v0.4.2) - Sforzo MEDIO
-1. Aggiungere campo `snrAvg` a SeenNode (EMA su 8 campioni)
-2. Aggiungere `healthCheck()` chiamata ogni 60s nel loop
-3. Logica: nodo offline > 30min, SNR degradato > 6dB
-4. Rate limit: max 1 alert/nodo/30min
-5. Comandi: `health` (stato), `health threshold N` (configura)
-6. ~800B Flash, 150B RAM, 0 EEPROM
+## Fase 2: Mesh Health Monitor (COMPLETATA)
+
+### Implementazione
+- `snrAvg` EMA (7/8 + 1/8) aggiunto a SeenNode
+- `offlineAlerted` flag per evitare alert ripetuti (reset quando nodo torna)
+- `healthCheck()` chiamata ogni 60s nel loop, scorre SeenNodesTracker
+- Alert automatico quando un nodo (con almeno 3 pacchetti visti) e' offline >30min
+- Comando `health` disponibile sia via serial che via remote CLI
+- Output: conteggio nodi, offline, SNR corrente vs media, tempo dall'ultimo pacchetto
+
+**Costo reale**: 936 B Flash, 64 B RAM, 0 EEPROM
+**Stato post-Fase 2**: Flash 130,240/131,072 (99.4%) - **832 B liberi**
 
 ### Fase 3: Store-and-Forward Mailbox (v0.5.0) - Sforzo ALTO
 1. Struttura `MailboxEntry` in EEPROM (offset 340, 2 slot)

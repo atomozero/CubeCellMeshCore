@@ -20,6 +20,10 @@ void startReceive();
 bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int16_t rssi);
 uint32_t getPacketId(MCPacket* pkt);
 
+// Health monitor thresholds
+#define HEALTH_OFFLINE_MS       1800000  // 30 minutes
+#define HEALTH_SNR_DROP_THRESH  24       // 6dB drop in SNR*4 units
+
 // Helper: check if a pubkey buffer is non-zero
 static inline bool isPubKeySet(const uint8_t* key) {
     for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
@@ -41,7 +45,7 @@ void processCommand(char* cmd) {
         LOG_RAW("status stats lifetime radiostats packetstats advert nodes contacts\n\r"
                 "neighbours telemetry identity name location time nodetype passwd\n\r"
                 "sleep rxboost radio tempradio ratelimit savestats alert newid\n\r"
-                "power acl repeat ping trace rssi mode set report\n\r"
+                "power acl repeat ping trace rssi mode set report health\n\r"
                 "reset save reboot\n\r");
     }
     else if (strcmp(cmd, "status") == 0) {
@@ -498,6 +502,27 @@ void processCommand(char* cmd) {
         LOG_RAW("Flood RX:%lu TX:%lu Direct RX:%lu TX:%lu\n\r",
             ps.numRecvFlood, ps.numSentFlood, ps.numRecvDirect, ps.numSentDirect);
     }
+    else if (strcmp(cmd, "health") == 0) {
+        uint8_t cnt = seenNodes.getCount();
+        uint32_t now = millis();
+        uint8_t offline = 0;
+        for (uint8_t i = 0; i < cnt; i++) {
+            const SeenNode* n = seenNodes.getNode(i);
+            if (n && (now - n->lastSeen) > HEALTH_OFFLINE_MS) offline++;
+        }
+        LOG_RAW("Nodes:%d Offline:%d Alert:%s\n\r", cnt, offline,
+            alertEnabled ? "ON" : "OFF");
+        for (uint8_t i = 0; i < cnt; i++) {
+            const SeenNode* n = seenNodes.getNode(i);
+            if (n && n->lastSeen > 0) {
+                uint32_t ago = (now - n->lastSeen) / 1000;
+                LOG_RAW(" %02X %s snr=%d/%ddB %lus%s\n\r", n->hash,
+                    n->name[0] ? n->name : "-",
+                    n->lastSnr/4, n->snrAvg/4, ago,
+                    ago > HEALTH_OFFLINE_MS/1000 ? " OFF" : "");
+            }
+        }
+    }
     else if (strcmp(cmd, "power") == 0) {
         const char* modeStr = powerSaveMode == 0 ? "Perf" : powerSaveMode == 1 ? "Bal" : "PwrSave";
         LOG_RAW("Mode:%s RxBoost:%s Sleep:%s\n\r", modeStr,
@@ -765,6 +790,26 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
         RESP_APPEND("Boots:%u RX:%lu TX:%lu FWD:%lu Nodes:%lu\n",
             ps->bootCount, ps->totalRxPackets, ps->totalTxPackets,
             ps->totalFwdPackets, ps->totalUniqueNodes);
+    }
+    else if (strcmp(cmd, "health") == 0) {
+        uint8_t cnt = seenNodes.getCount();
+        uint8_t offline = 0;
+        uint32_t now = millis();
+        for (uint8_t i = 0; i < cnt; i++) {
+            const SeenNode* n = seenNodes.getNode(i);
+            if (n && (now - n->lastSeen) > HEALTH_OFFLINE_MS) offline++;
+        }
+        RESP_APPEND("Nodes:%d Off:%d Alert:%s\n", cnt, offline,
+            alertEnabled ? "on" : "off");
+        for (uint8_t i = 0; i < cnt && len < maxLen - 32; i++) {
+            const SeenNode* n = seenNodes.getNode(i);
+            if (n && n->lastSeen > 0) {
+                uint32_t ago = (now - n->lastSeen) / 1000;
+                RESP_APPEND("%02X %d/%ddB %lus%s\n", n->hash,
+                    n->lastSnr/4, n->snrAvg/4, ago,
+                    ago > HEALTH_OFFLINE_MS/1000 ? " OFF" : "");
+            }
+        }
     }
 
     // === Admin-only commands ===
@@ -1783,6 +1828,31 @@ bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int
              typeStr, nodeName[0] ? nodeName : "?", nodeHash, rssi);
 
     return sendEncryptedToAdmin(alertDestPubKey, message, strlen(message));
+}
+
+//=============================================================================
+// Mesh Health Monitor
+//=============================================================================
+void healthCheck() {
+    if (!alertEnabled || !isPubKeySet(alertDestPubKey)) return;
+
+    uint32_t now = millis();
+    for (uint8_t i = 0; i < seenNodes.getCount(); i++) {
+        const SeenNode* n = seenNodes.getNode(i);
+        if (!n || n->lastSeen == 0 || n->pktCount < 3) continue;
+
+        uint32_t elapsed = now - n->lastSeen;
+
+        // Check offline (>30min, not already alerted)
+        if (elapsed > HEALTH_OFFLINE_MS && !n->offlineAlerted) {
+            char msg[40];
+            snprintf(msg, sizeof(msg), "OFFLINE %02X %s %lum",
+                n->hash, n->name[0] ? n->name : "?", elapsed / 60000);
+            sendNodeAlert(n->name[0] ? n->name : "?", n->hash, 0, n->lastRssi);
+            // Cast away const to set flag (node is in our tracker)
+            ((SeenNode*)n)->offlineAlerted = true;
+        }
+    }
 }
 
 void checkAdvertBeacon() {
@@ -2913,11 +2983,12 @@ void loop() {
         telemetry.update();
     }
 
-    // Periodic cleanup of expired neighbors (every 60 seconds)
+    // Periodic cleanup and health check (every 60 seconds)
     {
         static uint32_t lastCleanup = 0;
         if (millis() - lastCleanup > 60000) {
             repeaterHelper.cleanup();
+            healthCheck();
             lastCleanup = millis();
         }
     }

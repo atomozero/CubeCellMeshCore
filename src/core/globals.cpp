@@ -148,6 +148,9 @@ bool SeenNodesTracker::update(uint8_t hash, int16_t rssi, int8_t snr, const char
         if (nodes[i].hash == hash) {
             nodes[i].lastRssi = rssi;
             nodes[i].lastSnr = snr;
+            // EMA: avg = avg*7/8 + snr/8
+            nodes[i].snrAvg = (int8_t)(((int16_t)nodes[i].snrAvg * 7 + snr) / 8);
+            nodes[i].offlineAlerted = false;  // Node is back
             nodes[i].lastSeen = millis();
             if (nodes[i].pktCount < 255) nodes[i].pktCount++;
             if (name && name[0] != '\0' && nodes[i].name[0] == '\0') {
@@ -162,6 +165,8 @@ bool SeenNodesTracker::update(uint8_t hash, int16_t rssi, int8_t snr, const char
         nodes[count].hash = hash;
         nodes[count].lastRssi = rssi;
         nodes[count].lastSnr = snr;
+        nodes[count].snrAvg = snr;
+        nodes[count].offlineAlerted = false;
         nodes[count].pktCount = 1;
         nodes[count].lastSeen = millis();
         if (name && name[0] != '\0') {
@@ -184,6 +189,8 @@ bool SeenNodesTracker::update(uint8_t hash, int16_t rssi, int8_t snr, const char
         nodes[oldest].hash = hash;
         nodes[oldest].lastRssi = rssi;
         nodes[oldest].lastSnr = snr;
+        nodes[oldest].snrAvg = snr;
+        nodes[oldest].offlineAlerted = false;
         nodes[oldest].pktCount = 1;
         nodes[oldest].lastSeen = millis();
         if (name && name[0] != '\0') {

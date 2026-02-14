@@ -158,9 +158,11 @@ struct SeenNode {
     uint8_t hash;
     int16_t lastRssi;
     int8_t lastSnr;
+    int8_t snrAvg;          // EMA of SNR (x4), for health monitoring
     uint8_t pktCount;
     uint32_t lastSeen;
     char name[12];
+    bool offlineAlerted;    // true if offline alert already sent
 };
 
 class SeenNodesTracker {
