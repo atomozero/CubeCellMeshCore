@@ -5,14 +5,16 @@
 
 /**
  * Store-and-Forward Mailbox
- * Stores packets for offline nodes in EEPROM (172 bytes at offset 340)
+ * Persistent: 2 slots in EEPROM (172 bytes at offset 340)
+ * Overflow: 4 slots in RAM (volatile, lost on reboot)
  * Re-delivers when destination node comes back online
  */
 
 #define MAILBOX_EEPROM_OFFSET   340
 #define MAILBOX_MAGIC           0xBB0F
 #define MAILBOX_VERSION         1
-#define MAILBOX_SLOTS           2
+#define MAILBOX_SLOTS           2       // EEPROM persistent slots
+#define MAILBOX_RAM_SLOTS       4       // RAM overflow slots
 #define MAILBOX_PKT_MAX         76      // Max serialized packet size per slot
 #define MAILBOX_TTL_SEC         86400   // 24 hours
 
@@ -26,14 +28,15 @@ struct MailboxSlot {
 struct MailboxHeader {
     uint16_t magic;
     uint8_t version;
-    uint8_t count;              // Number of occupied slots
+    uint8_t count;              // Number of occupied EEPROM slots
     uint8_t reserved[4];
 };
 
 class Mailbox {
 private:
     MailboxHeader header;
-    MailboxSlot slots[MAILBOX_SLOTS];
+    MailboxSlot slots[MAILBOX_SLOTS];       // EEPROM-backed (persistent)
+    MailboxSlot ramSlots[MAILBOX_RAM_SLOTS]; // RAM-only (volatile)
 
     void writeToEeprom() {
         EEPROM.put(MAILBOX_EEPROM_OFFSET, header);
@@ -49,11 +52,38 @@ private:
         EEPROM.commit();
     }
 
+    // Store into a specific slot array. Returns true if stored.
+    bool storeInArray(MailboxSlot* arr, uint8_t arrSize, uint8_t destHash,
+                      const uint8_t* buf, uint8_t len, uint32_t unixTime) {
+        // Find empty slot
+        for (uint8_t i = 0; i < arrSize; i++) {
+            if (arr[i].pktLen == 0) {
+                arr[i].destHash = destHash;
+                arr[i].timestamp = unixTime;
+                arr[i].pktLen = len;
+                memcpy(arr[i].pktData, buf, len);
+                return true;
+            }
+        }
+        // No empty - overwrite oldest
+        uint8_t oldest = 0;
+        for (uint8_t i = 1; i < arrSize; i++) {
+            if (arr[i].timestamp < arr[oldest].timestamp) oldest = i;
+        }
+        arr[oldest].destHash = destHash;
+        arr[oldest].timestamp = unixTime;
+        arr[oldest].pktLen = len;
+        memcpy(arr[oldest].pktData, buf, len);
+        return true;
+    }
+
 public:
     void load() {
+        // Clear RAM slots
+        memset(ramSlots, 0, sizeof(ramSlots));
+
         EEPROM.get(MAILBOX_EEPROM_OFFSET, header);
         if (header.magic != MAILBOX_MAGIC || header.version != MAILBOX_VERSION) {
-            // Initialize fresh
             header.magic = MAILBOX_MAGIC;
             header.version = MAILBOX_VERSION;
             header.count = 0;
@@ -68,13 +98,13 @@ public:
     }
 
     // Store a packet for offline node. Returns true if stored.
+    // Priority: EEPROM first (persistent), then RAM overflow (volatile).
     bool store(uint8_t destHash, MCPacket* pkt, uint32_t unixTime) {
-        // Serialize packet
         uint8_t buf[MAILBOX_PKT_MAX];
         uint16_t len = pkt->serialize(buf, MAILBOX_PKT_MAX);
         if (len == 0 || len > MAILBOX_PKT_MAX) return false;
 
-        // Find empty slot
+        // Try EEPROM slots first (persistent across reboot)
         for (uint8_t i = 0; i < MAILBOX_SLOTS; i++) {
             if (slots[i].pktLen == 0) {
                 slots[i].destHash = destHash;
@@ -87,35 +117,28 @@ public:
             }
         }
 
-        // No empty slot - overwrite oldest
-        uint8_t oldest = 0;
-        for (uint8_t i = 1; i < MAILBOX_SLOTS; i++) {
-            if (slots[i].timestamp < slots[oldest].timestamp) oldest = i;
-        }
-        slots[oldest].destHash = destHash;
-        slots[oldest].timestamp = unixTime;
-        slots[oldest].pktLen = len;
-        memcpy(slots[oldest].pktData, buf, len);
-        writeSlot(oldest);
-        return true;
+        // EEPROM full - overflow to RAM
+        return storeInArray(ramSlots, MAILBOX_RAM_SLOTS, destHash, buf, len, unixTime);
     }
 
-    // Check if there are messages for a given dest hash. Returns count.
+    // Count messages for a given dest hash (EEPROM + RAM).
     uint8_t countFor(uint8_t destHash) const {
         uint8_t n = 0;
         for (uint8_t i = 0; i < MAILBOX_SLOTS; i++) {
             if (slots[i].pktLen > 0 && slots[i].destHash == destHash) n++;
         }
+        for (uint8_t i = 0; i < MAILBOX_RAM_SLOTS; i++) {
+            if (ramSlots[i].pktLen > 0 && ramSlots[i].destHash == destHash) n++;
+        }
         return n;
     }
 
-    // Retrieve and remove one message for destHash. Returns true if found.
-    // Writes deserialized packet to outPkt.
+    // Retrieve and remove one message for destHash. EEPROM first, then RAM.
     bool popFor(uint8_t destHash, MCPacket* outPkt) {
+        // Check EEPROM slots first
         for (uint8_t i = 0; i < MAILBOX_SLOTS; i++) {
             if (slots[i].pktLen > 0 && slots[i].destHash == destHash) {
                 if (outPkt->deserialize(slots[i].pktData, slots[i].pktLen)) {
-                    // Clear slot
                     slots[i].pktLen = 0;
                     if (header.count > 0) header.count--;
                     writeSlot(i);
@@ -123,34 +146,70 @@ public:
                 }
             }
         }
+        // Check RAM slots
+        for (uint8_t i = 0; i < MAILBOX_RAM_SLOTS; i++) {
+            if (ramSlots[i].pktLen > 0 && ramSlots[i].destHash == destHash) {
+                if (outPkt->deserialize(ramSlots[i].pktData, ramSlots[i].pktLen)) {
+                    ramSlots[i].pktLen = 0;
+                    return true;
+                }
+            }
+        }
         return false;
     }
 
-    // Expire messages older than TTL. Call periodically.
+    // Expire messages older than TTL (EEPROM + RAM).
     void expireOld(uint32_t currentUnixTime) {
         for (uint8_t i = 0; i < MAILBOX_SLOTS; i++) {
-            if (slots[i].pktLen > 0 && currentUnixTime > slots[i].timestamp) {
-                if ((currentUnixTime - slots[i].timestamp) > MAILBOX_TTL_SEC) {
-                    slots[i].pktLen = 0;
-                    if (header.count > 0) header.count--;
-                    writeSlot(i);
-                }
+            if (slots[i].pktLen > 0 && currentUnixTime > slots[i].timestamp &&
+                (currentUnixTime - slots[i].timestamp) > MAILBOX_TTL_SEC) {
+                slots[i].pktLen = 0;
+                if (header.count > 0) header.count--;
+                writeSlot(i);
+            }
+        }
+        for (uint8_t i = 0; i < MAILBOX_RAM_SLOTS; i++) {
+            if (ramSlots[i].pktLen > 0 && currentUnixTime > ramSlots[i].timestamp &&
+                (currentUnixTime - ramSlots[i].timestamp) > MAILBOX_TTL_SEC) {
+                ramSlots[i].pktLen = 0;
             }
         }
     }
 
-    // Clear all slots
+    // Clear all slots (EEPROM + RAM)
     void clear() {
         memset(slots, 0, sizeof(slots));
+        memset(ramSlots, 0, sizeof(ramSlots));
         header.count = 0;
         writeToEeprom();
     }
 
-    uint8_t getCount() const { return header.count; }
-    uint8_t getSlots() const { return MAILBOX_SLOTS; }
+    // Total occupied count (EEPROM + RAM)
+    uint8_t getCount() const {
+        uint8_t n = header.count;
+        for (uint8_t i = 0; i < MAILBOX_RAM_SLOTS; i++) {
+            if (ramSlots[i].pktLen > 0) n++;
+        }
+        return n;
+    }
+
+    uint8_t getTotalSlots() const { return MAILBOX_SLOTS + MAILBOX_RAM_SLOTS; }
+    uint8_t getEepromCount() const { return header.count; }
+    uint8_t getRamCount() const {
+        uint8_t n = 0;
+        for (uint8_t i = 0; i < MAILBOX_RAM_SLOTS; i++) {
+            if (ramSlots[i].pktLen > 0) n++;
+        }
+        return n;
+    }
 
     const MailboxSlot* getSlot(uint8_t idx) const {
         if (idx < MAILBOX_SLOTS) return &slots[idx];
+        idx -= MAILBOX_SLOTS;
+        if (idx < MAILBOX_RAM_SLOTS) return &ramSlots[idx];
         return nullptr;
     }
+
+    // Is a given slot index in EEPROM (persistent)?
+    bool isEepromSlot(uint8_t idx) const { return idx < MAILBOX_SLOTS; }
 };

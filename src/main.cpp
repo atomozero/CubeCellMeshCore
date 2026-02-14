@@ -247,12 +247,14 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
         }
     }
     else if (strcmp(cmd, "mailbox") == 0) {
-        CP("Mbox:%d/%d\n", mailbox.getCount(), mailbox.getSlots());
-        for (uint8_t i = 0; i < mailbox.getSlots(); i++) {
+        CP("Mbox:%d/%d E:%d R:%d\n", mailbox.getCount(), mailbox.getTotalSlots(),
+            mailbox.getEepromCount(), mailbox.getRamCount());
+        for (uint8_t i = 0; i < mailbox.getTotalSlots(); i++) {
             const MailboxSlot* s = mailbox.getSlot(i);
             if (s && s->pktLen > 0) {
                 uint32_t age = timeSync.isSynchronized() ? (timeSync.getTimestamp() - s->timestamp) : 0;
-                CP(" %d: dest=%02X %dB %lus\n", i, s->destHash, s->pktLen, age);
+                CP(" %c%d:%02X %dB %lus\n", mailbox.isEepromSlot(i) ? 'E' : 'R',
+                    i, s->destHash, s->pktLen, age);
             }
         }
     }
