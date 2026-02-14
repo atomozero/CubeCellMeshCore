@@ -97,12 +97,29 @@ public:
         }
     }
 
+    // Check if packet data is already stored (dedup).
+    bool isDuplicate(const uint8_t* buf, uint8_t len) const {
+        for (uint8_t i = 0; i < MAILBOX_SLOTS; i++) {
+            if (slots[i].pktLen == len && memcmp(slots[i].pktData, buf, len) == 0)
+                return true;
+        }
+        for (uint8_t i = 0; i < MAILBOX_RAM_SLOTS; i++) {
+            if (ramSlots[i].pktLen == len && memcmp(ramSlots[i].pktData, buf, len) == 0)
+                return true;
+        }
+        return false;
+    }
+
     // Store a packet for offline node. Returns true if stored.
     // Priority: EEPROM first (persistent), then RAM overflow (volatile).
+    // Rejects duplicates (same packet received from multiple repeaters).
     bool store(uint8_t destHash, MCPacket* pkt, uint32_t unixTime) {
         uint8_t buf[MAILBOX_PKT_MAX];
         uint16_t len = pkt->serialize(buf, MAILBOX_PKT_MAX);
         if (len == 0 || len > MAILBOX_PKT_MAX) return false;
+
+        // Dedup: reject if identical packet already stored
+        if (isDuplicate(buf, len)) return false;
 
         // Try EEPROM slots first (persistent across reboot)
         for (uint8_t i = 0; i < MAILBOX_SLOTS; i++) {
