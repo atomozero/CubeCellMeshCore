@@ -1224,9 +1224,8 @@ bool transmitPacket(MCPacket* pkt) {
     dio1Flag = false;
 
     ledTxOn();
-    LOG(TAG_TX " %s %s path=%d len=%d\n\r",
-        mcRouteTypeName(pkt->header.getRouteType()),
-        mcPayloadTypeName(pkt->header.getPayloadType()),
+    LOG(TAG_TX " r%d t%d p=%d l=%d\n\r",
+        pkt->header.getRouteType(), pkt->header.getPayloadType(),
         pkt->pathLen, pkt->payloadLen);
 
     radioError = radio.startTransmit(buf, len);
@@ -2466,9 +2465,8 @@ void processReceivedPacket(MCPacket* pkt) {
     packetLogger.log(pkt, false);
     #endif
 
-    LOG(TAG_RX " %s %s path=%d len=%d rssi=%ddBm snr=%d.%ddB\n\r",
-        mcRouteTypeName(pkt->header.getRouteType()),
-        mcPayloadTypeName(pkt->header.getPayloadType()),
+    LOG(TAG_RX " r%d t%d p=%d l=%d %d/%d.%d\n\r",
+        pkt->header.getRouteType(), pkt->header.getPayloadType(),
         pkt->pathLen, pkt->payloadLen,
         pkt->rssi, pkt->snr / 4, abs(pkt->snr % 4) * 25);
 

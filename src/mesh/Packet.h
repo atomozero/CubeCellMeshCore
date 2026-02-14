@@ -199,33 +199,3 @@ struct MCPacket {
     }
 };
 
-// Helper to get route type name
-inline const char* mcRouteTypeName(uint8_t rt) {
-    switch (rt) {
-        case MC_ROUTE_TRANSPORT_FLOOD: return "TF";
-        case MC_ROUTE_FLOOD: return "FL";
-        case MC_ROUTE_DIRECT: return "DR";
-        case MC_ROUTE_TRANSPORT_DIRECT: return "TD";
-        default: return "??";
-    }
-}
-
-// Helper to get payload type name
-inline const char* mcPayloadTypeName(uint8_t pt) {
-    switch (pt) {
-        case MC_PAYLOAD_REQUEST: return "REQ";
-        case MC_PAYLOAD_RESPONSE: return "RSP";
-        case MC_PAYLOAD_PLAIN: return "TXT";
-        case MC_PAYLOAD_ACK: return "ACK";
-        case MC_PAYLOAD_ADVERT: return "ADV";
-        case MC_PAYLOAD_GROUP_TEXT: return "GTX";
-        case MC_PAYLOAD_GROUP_DATA: return "GDT";
-        case MC_PAYLOAD_ANON_REQ: return "ANO";
-        case MC_PAYLOAD_PATH_RETURN: return "PTH";
-        case MC_PAYLOAD_PATH_TRACE: return "TRC";
-        case MC_PAYLOAD_MULTIPART: return "MUL";
-        case MC_PAYLOAD_CONTROL: return "CTL";
-        case MC_PAYLOAD_RAW: return "RAW";
-        default: return "???";
-    }
-}
