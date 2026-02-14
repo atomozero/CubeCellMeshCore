@@ -20,6 +20,14 @@ void startReceive();
 bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int16_t rssi);
 uint32_t getPacketId(MCPacket* pkt);
 
+// Helper: check if a pubkey buffer is non-zero
+static inline bool isPubKeySet(const uint8_t* key) {
+    for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
+        if (key[i] != 0) return true;
+    }
+    return false;
+}
+
 //=============================================================================
 // Serial Command Handler
 //=============================================================================
@@ -366,20 +374,12 @@ void processCommand(char* cmd) {
     }
     #endif
     else if (strcmp(cmd, "alert") == 0) {
-        bool keySet = false;
-        for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
-            if (alertDestPubKey[i] != 0) { keySet = true; break; }
-        }
         LOG_RAW("Alert:%s Dest:%s\n\r",
             alertEnabled ? "ON" : "OFF",
-            keySet ? "set" : "none");
+            isPubKeySet(alertDestPubKey) ? "set" : "none");
     }
     else if (strcmp(cmd, "alert on") == 0) {
-        bool keySet = false;
-        for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
-            if (alertDestPubKey[i] != 0) { keySet = true; break; }
-        }
-        if (keySet) {
+        if (isPubKeySet(alertDestPubKey)) {
             alertEnabled = true;
             saveConfig();
             LOG_RAW("Alert ON\n\r");
@@ -551,20 +551,12 @@ void processCommand(char* cmd) {
     }
 #ifdef ENABLE_DAILY_REPORT
     else if (strcmp(cmd, "report") == 0) {
-        bool keySet = false;
-        for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
-            if (reportDestPubKey[i] != 0) { keySet = true; break; }
-        }
         LOG_RAW("Report:%s Time:%02d:%02d Dest:%s\n\r",
             reportEnabled ? "ON" : "OFF", reportHour, reportMinute,
-            keySet ? "set" : "none");
+            isPubKeySet(reportDestPubKey) ? "set" : "none");
     }
     else if (strcmp(cmd, "report on") == 0) {
-        bool keySet = false;
-        for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
-            if (reportDestPubKey[i] != 0) { keySet = true; break; }
-        }
-        if (keySet) {
+        if (isPubKeySet(reportDestPubKey)) {
             reportEnabled = true; saveConfig();
             LOG_RAW("Report ON (%02d:%02d)\n\r", reportHour, reportMinute);
         } else LOG_RAW("No dest key\n\r");
@@ -578,11 +570,7 @@ void processCommand(char* cmd) {
         saveConfig(); LOG_RAW("Report cleared\n\r");
     }
     else if (strcmp(cmd, "report test") == 0) {
-        bool keySet = false;
-        for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
-            if (reportDestPubKey[i] != 0) { keySet = true; break; }
-        }
-        if (keySet) {
+        if (isPubKeySet(reportDestPubKey)) {
             extern bool sendDailyReport();
             LOG_RAW(sendDailyReport() ? "Report sent\n\r" : "Report fail\n\r");
         } else LOG_RAW("No dest key\n\r");
@@ -893,13 +881,9 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     }
 #ifdef ENABLE_DAILY_REPORT
     else if (strcmp(cmd, "report") == 0) {
-        bool keySet = false;
-        for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
-            if (reportDestPubKey[i] != 0) { keySet = true; break; }
-        }
         RESP_APPEND("Rpt:%s %02d:%02d D:%02X%s\n",
             reportEnabled ? "ON" : "OFF", reportHour, reportMinute,
-            reportDestPubKey[0], keySet ? "" : "(no)");
+            reportDestPubKey[0], isPubKeySet(reportDestPubKey) ? "" : "(no)");
     }
     else if (strncmp(cmd, "report dest ", 12) == 0 && isAdmin) {
         const char* arg = cmd + 12;
@@ -911,11 +895,7 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
         } else RESP_APPEND("E:not found\n");
     }
     else if (strcmp(cmd, "report on") == 0 && isAdmin) {
-        bool keySet = false;
-        for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
-            if (reportDestPubKey[i] != 0) { keySet = true; break; }
-        }
-        if (keySet) {
+        if (isPubKeySet(reportDestPubKey)) {
             reportEnabled = true; saveConfig();
             RESP_APPEND("Rpt ON %02d:%02d\n", reportHour, reportMinute);
         } else RESP_APPEND("E:no dest\n");
@@ -1611,12 +1591,7 @@ uint16_t generateNodesReport(char* buf, uint16_t maxLen) {
  * Used by node alerts (and daily report if enabled)
  */
 bool sendEncryptedToAdmin(const uint8_t* destPubKey, const char* text, uint16_t textLen) {
-    // Check if destination key is set
-    bool keySet = false;
-    for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
-        if (destPubKey[i] != 0) { keySet = true; break; }
-    }
-    if (!keySet || !timeSync.isSynchronized()) return false;
+    if (!isPubKeySet(destPubKey) || !timeSync.isSynchronized()) return false;
 
     // Calculate shared secret
     uint8_t sharedSecret[MC_SHARED_SECRET_SIZE];
@@ -2424,12 +2399,7 @@ bool processAnonRequest(MCPacket* pkt) {
     if (isAdmin) {
         // Check if this is a new admin key (different from current)
         bool isNewKey = (memcmp(reportDestPubKey, ephemeralPub, REPORT_PUBKEY_SIZE) != 0);
-        bool keyEmpty = true;
-        for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
-            if (reportDestPubKey[i] != 0) { keyEmpty = false; break; }
-        }
-
-        if (isNewKey || keyEmpty) {
+        if (isNewKey || !isPubKeySet(reportDestPubKey)) {
             memcpy(reportDestPubKey, ephemeralPub, REPORT_PUBKEY_SIZE);
             saveConfig();
         }
