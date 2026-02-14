@@ -8,20 +8,23 @@ MeshCore-compatible repeater firmware for Heltec CubeCell HTCC-AB01.
 - **Ed25519 Signatures** - Compact implementation saves ~97KB Flash
 - **ADVERT Broadcasting** - Node discovery and time synchronization
 - **Packet Forwarding** - SNR-based CSMA/CA with weighted backoff
-- **Remote CLI** - Encrypted command access via mesh network
+- **Remote Configuration** - Full CLI access via encrypted mesh channel (no USB needed)
+- **Store-and-Forward Mailbox** - Stores messages for offline nodes, re-delivers on return
+- **Mesh Health Monitor** - Automatic alerts when nodes go offline or links degrade
 - **Low Power** - Deep sleep support with duty-cycle RX
 - **Telemetry** - Battery voltage, node statistics
 - **Neighbour Tracking** - Direct repeater discovery via 0-hop ADVERTs
 - **Rate Limiting** - Protection against flood/spam attacks
 - **Persistent Statistics** - Lifetime stats survive reboots (EEPROM)
+- **Daily Reports** - Scheduled status reports sent to admin via mesh
 
 ## Hardware
 
 - **Board**: Heltec CubeCell HTCC-AB01
 - **MCU**: ASR6501 SiP (ARM Cortex-M0+ @ 48 MHz + SX1262)
 - **Radio**: SX1262 LoRa transceiver (integrated, no FPU)
-- **Flash**: 128 KB (97.7% used, ~3 KB free)
-- **RAM**: 16 KB (49.7% static, ~4 KB free at runtime incl. stack/heap)
+- **Flash**: 128 KB (91.0% used, ~12 KB free)
+- **RAM**: 16 KB (47.9% static, ~8 KB free at runtime incl. stack/heap)
 - **Deep sleep**: ~3.5 uA (MCU + radio)
 
 ## Quick Start
@@ -58,81 +61,9 @@ Default settings (EU868):
 
 Connect at 115200 baud. Type `help` for command list.
 
-### Status & Info
+See [Command Reference](release/COMMANDS.md) for the full list of 50+ commands.
 
-| Command | Description |
-|---------|-------------|
-| `status` | Firmware, frequency, time sync, RSSI/SNR |
-| `stats` | Session counters: RX/TX/FWD/ERR, ADV, queue |
-| `lifetime` | Persistent stats: boots, totals, logins |
-| `radiostats` | Noise floor, last RSSI/SNR, airtime TX/RX |
-| `packetstats` | Packet breakdown: flood/direct RX/TX |
-| `telemetry` | Battery mV/%, temperature, uptime |
-| `identity` | Node name, hash, public key |
-| `nodes` | Discovered nodes (hash, name, RSSI, last seen date/time) |
-| `contacts` | Known contacts with public keys |
-| `neighbours` | Direct repeater neighbours (0-hop) |
-
-### Configuration
-
-| Command | Description |
-|---------|-------------|
-| `name <name>` | Set node name (1-15 chars) |
-| `location <lat> <lon>` | Set GPS coordinates |
-| `location` | Show current location |
-| `location clear` | Clear location |
-| `time [timestamp]` | Show or set Unix time |
-| `nodetype chat\|repeater` | Set node type |
-| `passwd` | Show admin/guest passwords |
-| `passwd admin <pwd>` | Set admin password |
-| `passwd guest <pwd>` | Set guest password |
-| `sleep on\|off` | Enable/disable deep sleep |
-| `rxboost on\|off` | Enable/disable RX gain boost |
-
-### Radio
-
-| Command | Description |
-|---------|-------------|
-| `radio` | Show current radio parameters |
-| `tempradio <freq> <bw> <sf> <cr>` | Set temporary radio params |
-| `tempradio off` | Revert to default radio config |
-
-### ADVERT & Alerts
-
-| Command | Description |
-|---------|-------------|
-| `advert` | Send ADVERT beacon now |
-| `advert interval [sec]` | Show or set beacon interval |
-| `alert` | Show alert status |
-| `alert on\|off` | Enable/disable node alerts |
-| `alert dest <name\|pubkey>` | Set alert destination |
-| `alert clear` | Clear alert config |
-| `alert test` | Send test alert |
-
-### Rate Limiting
-
-| Command | Description |
-|---------|-------------|
-| `ratelimit` | Show rate limit stats |
-| `ratelimit on\|off` | Enable/disable rate limiting |
-| `ratelimit reset` | Reset rate limit counters |
-
-### Ping
-
-| Command | Description |
-|---------|-------------|
-| `ping` | Send broadcast test packet (FLOOD) |
-| `ping <hash>` | Directed ping to node `<hash>`, auto-PONG reply |
-
-### System
-
-| Command | Description |
-|---------|-------------|
-| `savestats` | Save statistics to EEPROM |
-| `newid` | Generate new Ed25519 identity |
-| `save` | Save config to EEPROM |
-| `reset` | Reset config to factory defaults |
-| `reboot` | Restart device |
+Key command categories: status, configuration, radio, network, mailbox, health monitor, daily report, alerts, rate limiting, ping/trace, and system administration. All commands are available both via serial console and remotely via the MeshCore app's encrypted CLI.
 
 ## Project Structure
 
@@ -149,8 +80,9 @@ src/
     ├── Contacts.h    # Contact management
     ├── Crypto.h      # Encryption helpers
     ├── Identity.h    # Ed25519 keys
+    ├── Mailbox.h     # Store-and-forward mailbox
     ├── Packet.h      # Packet format
-    ├── Repeater.h    # Forwarding stats
+    ├── Repeater.h    # Forwarding, sessions, rate limiting
     └── Telemetry.h   # Sensor data
 
 lib/
@@ -258,6 +190,19 @@ MIT License - See LICENSE file for details.
 - [RadioLib](https://github.com/jgromes/RadioLib) - LoRa library
 
 ## Changelog
+
+### v0.5.0 (2026-02-14)
+- **Store-and-Forward Mailbox** - Messages for offline nodes stored and re-delivered automatically
+  - 2 persistent EEPROM slots + 4 volatile RAM overflow slots = 6 messages max
+  - 24h TTL, automatic cleanup, triggered by ADVERT from returning node
+- **Mesh Health Monitor** - Automatic alerts when nodes go offline (>30 min)
+  - Per-node SNR tracking (EMA), offline detection, chat node impersonation for alert delivery
+- **Full Remote Configuration** - All CLI commands available via encrypted mesh channel
+  - sleep, rxboost, mode, alert, report, ratelimit, mailbox - all remotely accessible
+- **Session security** - Idle sessions now expire after 1 hour
+- **Code optimization** - Merged duplicate CLI handlers, eliminated float parsing
+  - Saved 12.9 KB Flash by removing strtod/scanf float dependency chain
+  - Flash usage: 91.0% (was 98.2% in v0.4.0)
 
 ### v0.3.5 (2026-01-30)
 - Added temporary radio parameters (`tempradio` command)

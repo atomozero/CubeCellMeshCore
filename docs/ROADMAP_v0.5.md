@@ -235,7 +235,7 @@ Configurazione completa del repeater dall'app MeshCore senza cavo seriale, trami
 | OTA Config completa | ~500B | **1,024B** | 0B | 0B |
 | Health Monitor | ~800B | **1,120B** | 64B | 0B |
 | CLI Merge + Float opt | ~4,000B | **-12,916B** | -368B | 0B |
-| Store-and-Forward | ~1,500B | TBD | ~100B | ~168B |
+| Store-and-Forward | ~1,500B | **1,752B** | 512B | 172B |
 
 ---
 
@@ -322,9 +322,13 @@ Questo meccanismo e' usato sia da `healthCheck()` che da `alert test`.
 ## Fase 3: Store-and-Forward Mailbox (COMPLETATA)
 
 ### Implementazione
-- **Mailbox.h**: classe `Mailbox` con 2 slot in EEPROM (offset 340, 172 bytes)
-- **EEPROM layout**: Header(8B) + 2 x MailboxSlot(82B) = 172B
+- **Mailbox.h**: classe `Mailbox` con storage ibrido EEPROM + RAM
+- **EEPROM layout**: Header(8B) + 2 x MailboxSlot(82B) = 172B (offset 340)
   - MailboxSlot: destHash(1B) + timestamp(4B) + pktLen(1B) + pktData(76B)
+- **RAM overflow**: 4 slot volatili aggiuntivi (persi al reboot)
+  - Totale: 2 EEPROM (persistenti) + 4 RAM (volatili) = **6 messaggi max**
+  - Priorita' store: prima EEPROM, poi overflow in RAM
+  - Priorita' pop: prima EEPROM, poi RAM
 - **Store**: in `processReceivedPacket`, prima del forward
   - Solo per pacchetti con dest_hash (REQUEST, RESPONSE, PLAIN, ANON_REQ)
   - Solo se il dest e' un nodo conosciuto ma offline (>30min, almeno 2 pkt visti)
@@ -332,20 +336,27 @@ Questo meccanismo e' usato sia da `healthCheck()` che da `alert test`.
 - **Forward**: nell'handler ADVERT, dopo `seenNodes.update`
   - Quando un nodo torna online, tutti i messaggi pendenti vengono accodati in txQueue
 - **TTL**: 24h, cleanup ogni 60s nel loop periodico
-- **Comandi**: `mailbox` (stato) e `mailbox clear` (admin) in dispatchSharedCommand
+- **Comandi**: `mailbox` (stato con prefisso E/R) e `mailbox clear` (admin)
 
 ### Dettagli tecnici
 - Max packet serializzato per slot: 76 bytes
-  - Header(1) + pathLen(1) + path(~4) + payload(~70) = tipico ~76B
-  - Sufficiente per messaggi MeshCore standard
 - Se nessun slot libero, sovrascrive il piu' vecchio
 - Magic number 0xBB0F per protezione corruzione
 - I pacchetti vengono salvati raw (cifrati) - il repeater non li decifra
+- CLI mostra `Mbox:2/6 E:1 R:1` e prefisso `E0`/`R3` per ogni slot
 
-**Costo reale**: 1,304 B Flash, 184 B RAM, 172 B EEPROM
-**Stato post-Fase 3**: Flash 118,748/131,072 (90.6%) - **12,324 B liberi**
+**Costo reale**: 1,752 B Flash, 512 B RAM (328B per 4 slot RAM), 172 B EEPROM
+**Stato post-Fase 3**: Flash 119,196/131,072 (90.9%) - **11,876 B liberi**
 
-### Ordine completato: Fase 0 -> 1 -> 2 -> 2.5 -> 3
+## Fase 3.1: Security fix (COMPLETATA)
+
+- **Session cleanup**: `sessionManager.cleanupSessions()` nel loop 60s
+  - Le sessioni inattive >1 ora vengono cancellate (prima non scadevano mai)
+
+**Costo**: +56 B Flash
+**Stato post-Fase 3.1**: Flash 119,252/131,072 (91.0%) - **11,820 B liberi**
+
+### Ordine completato: Fase 0 -> 1 -> 2 -> 2.5 -> 3 -> 3.1
 Tutte le feature pianificate sono state implementate.
 
 ---
@@ -359,16 +370,19 @@ Tutte le feature pianificate sono state implementate.
 | Fase 1 (OTA CLI) | +1,024 B | 0 | 0 | 15 nuovi comandi remote |
 | Fase 2 (Health) | +1,120 B | +64 B | 0 | SNR EMA, alert chat node |
 | Fase 2.5 (Ottimiz) | -12,916 B | -368 B | 0 | Merge CLI, no float |
-| Fase 3 (Mailbox) | +1,304 B | +184 B | 172 B | Store-and-forward |
-| **Totale** | **-9,916 B** | **-640 B** | **+172 B** | |
-| **Finale** | **118,748 B (90.6%)** | **7,496 B (45.8%)** | **512/512** | |
+| Fase 3 (Mailbox) | +1,752 B | +512 B | 172 B | 2 EEPROM + 4 RAM slots |
+| Fase 3.1 (Security) | +56 B | 0 | 0 | Session expiry |
+| **Totale** | **-9,412 B** | **-312 B** | **+172 B** | |
+| **Finale** | **119,252 B (91.0%)** | **7,848 B (47.9%)** | **512/512** | |
+
+**Margine residuo**: 11,820 B Flash liberi, 8,536 B RAM liberi
 
 ---
 
 ## Metriche di successo
 
-- **OTA Config**: tutti i comandi serial disponibili anche via remote CLI
+- **Remote Config**: tutti i comandi serial disponibili anche via remote CLI
 - **Health Monitor**: alert entro 5 minuti dalla scomparsa di un nodo
 - **Mailbox**: messaggio consegnato entro 30s dal ritorno del nodo destinatario
 - **Stabilita'**: zero regressioni sui 66 test firmware esistenti
-- **Flash**: margine residuo > 500 bytes dopo tutte le feature
+- **Flash**: margine residuo 11.8 KB dopo tutte le feature (era 2.3 KB pre-ottimizzazione)

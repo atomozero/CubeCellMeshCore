@@ -1,4 +1,4 @@
-# CubeCellMeshCore v0.4.0 - Command Reference
+# CubeCellMeshCore v0.5.0 - Command Reference
 
 Serial console at 115200 baud.
 
@@ -17,6 +17,8 @@ Serial console at 115200 baud.
 | `nodes` | Discovered nodes (hash, name, RSSI, last seen date/time) |
 | `contacts` | Known contacts with public keys |
 | `neighbours` | Direct repeater neighbours (0-hop) |
+| `health` | Mesh health: node count, offline nodes, SNR trends |
+| `mailbox` | Store-and-forward mailbox status (slots, E/R, age) |
 
 ## Configuration
 
@@ -50,6 +52,30 @@ Serial console at 115200 baud.
 | `advert on\|off` | Enable/disable periodic ADVERT |
 | `advert interval` | Show ADVERT interval and next scheduled |
 
+## Store-and-Forward Mailbox
+
+The repeater stores messages for offline nodes and re-delivers them when the node comes back online (sends an ADVERT). Storage: 2 persistent EEPROM slots + 4 volatile RAM slots = 6 messages max.
+
+| Command | Description |
+|---------|-------------|
+| `mailbox` | Show mailbox status: used/total, EEPROM (E) and RAM (R) counts |
+| `mailbox clear` | Clear all mailbox slots (admin only) |
+
+Output example: `Mbox:2/6 E:1 R:1` means 2 messages stored, 1 in EEPROM (persistent), 1 in RAM (lost on reboot). Each slot shows `E0` or `R3` prefix to indicate storage type.
+
+## Health Monitor
+
+Automatic mesh health monitoring. Checks every 60 seconds for offline nodes (>30 min, at least 3 packets seen) and sends alerts to the configured destination.
+
+| Command | Description |
+|---------|-------------|
+| `health` | Show node count, offline count, per-node SNR and last seen |
+| `alert on\|off` | Enable/disable automatic health alerts |
+| `alert dest <name>` | Set alert destination (by contact name) |
+| `alert clear` | Clear alert configuration |
+| `alert test` | Send a test alert immediately |
+| `alert` | Show alert status (on/off, destination) |
+
 ## Daily Report
 
 | Command | Description |
@@ -58,6 +84,7 @@ Serial console at 115200 baud.
 | `report on` | Enable daily report (requires destination key) |
 | `report off` | Disable daily report |
 | `report test` | Send a test report immediately |
+| `report nodes` | Send a nodes report immediately |
 | `report time HH:MM` | Set report send time (24h format) |
 | `report clear` | Clear destination key and disable report |
 
@@ -69,8 +96,10 @@ The destination key is set automatically when an admin logs in from the MeshCore
 |---------|-------------|
 | `save` | Save configuration to EEPROM |
 | `savestats` | Force save statistics to EEPROM |
-| `alert on\|off` | Enable/disable alerts |
+| `resetstats` | Reset session statistics counters |
 | `ratelimit` | Show rate limiter status |
+| `ratelimit on\|off` | Enable/disable rate limiting |
+| `ratelimit reset` | Reset rate limit counters |
 | `newid` | Generate new Ed25519 identity |
 | `power` | Show power mode, RX boost, sleep status |
 | `acl` | Show passwords and active sessions |
@@ -81,6 +110,7 @@ The destination key is set automatically when an admin logs in from the MeshCore
 | `set flood.max <n>` | Set max flood hops (1-15) |
 | `ping` | Send broadcast test packet (FLOOD) |
 | `ping <hash>` | Directed ping to node `<hash>`, auto-PONG reply |
+| `trace <hash>` | Trace route to node `<hash>`, shows path and hop count |
 | `reset` | Reset configuration to defaults |
 | `reboot` | Restart device |
 
@@ -91,21 +121,35 @@ The destination key is set automatically when an admin logs in from the MeshCore
 - **Request**: 30 requests per minute (spam protection)
 - **Forward**: 100 packets per minute (flood protection)
 
-## Remote CLI (via MeshCore app)
+### Sessions
+- Up to 8 concurrent sessions
+- Idle sessions expire after 1 hour
+- Admin and guest permission levels
 
-Once authenticated via the MeshCore app, you can send CLI commands remotely.
+## Remote Configuration (via MeshCore app)
 
-### Guest-allowed commands (remote)
+All CLI commands are available remotely via the MeshCore app's encrypted CLI channel. No USB cable needed - manage your repeater from anywhere in the mesh.
+
+**Note**: This is configuration-only, NOT firmware OTA. The firmware itself can only be updated via USB cable. Remote configuration lets you change settings, monitor status, and manage the repeater without physical access.
+
+### Guest-allowed commands (read-only)
 - `status`, `stats`, `lifetime`, `telemetry`
 - `radiostats`, `packetstats`, `radio`
 - `nodes`, `contacts`, `neighbours`, `identity`
-- `time`, `advert interval`
+- `time`, `location`, `advert interval`
+- `repeat`, `power`, `health`, `mailbox`
+- `rssi`, `help`
 
-### Admin-only commands (remote)
-- `name`, `location`, `passwd`, `nodetype`
-- `set repeat/password/guest/flood.max`
-- `ping`, `ping <hash>`, `rxboost [on|off]`
-- `advert`, `save`, `reset`, `reboot`
+### Admin-only commands (read-write)
+- `name`, `location`, `location clear`
+- `set repeat on/off`, `set flood.max`, `set password`, `set guest`
+- `sleep on/off`, `rxboost on/off`, `mode 0/1/2`
+- `alert on/off/dest/clear/test`
+- `report on/off/dest/time/test/nodes`
+- `mailbox clear`, `ratelimit on/off/reset`, `resetstats`
+- `advert`, `advert interval`, `advert on/off`
+- `ping`, `ping <hash>`, `trace <hash>`
+- `save`, `reset`, `reboot`
 
 ## Radio Settings (EU868)
 
@@ -125,3 +169,6 @@ Once authenticated via the MeshCore app, you can send CLI commands remotely.
 3. Use `radiostats` and `packetstats` to monitor link quality
 4. Use `tempradio` to test different radio parameters without saving
 5. Check `lifetime` to see accumulated statistics across reboots
+6. Use `health` to monitor mesh link quality and node availability
+7. Enable `alert` to get automatic notifications when nodes go offline
+8. The `mailbox` stores messages for offline nodes automatically - no config needed
