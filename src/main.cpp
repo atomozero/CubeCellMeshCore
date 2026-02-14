@@ -33,7 +33,7 @@ void processCommand(char* cmd) {
         LOG_RAW("status stats lifetime radiostats packetstats advert nodes contacts\n\r"
                 "neighbours telemetry identity name location time nodetype passwd\n\r"
                 "sleep rxboost radio tempradio ratelimit savestats alert newid\n\r"
-                "power acl repeat ping rssi mode set report\n\r"
+                "power acl repeat ping trace rssi mode set report\n\r"
                 "reset save reboot\n\r");
     }
     else if (strcmp(cmd, "status") == 0) {
@@ -267,8 +267,12 @@ void processCommand(char* cmd) {
     }
     else if (strcmp(cmd, "location") == 0) {
         if (nodeIdentity.hasLocation()) {
-            LOG_RAW("Location: %.6f, %.6f\n\r",
-                nodeIdentity.getLatitudeFloat(), nodeIdentity.getLongitudeFloat());
+            {
+                int32_t lat = nodeIdentity.getLatitude();
+                int32_t lon = nodeIdentity.getLongitude();
+                LOG_RAW("Location: %ld.%06ld, %ld.%06ld\n\r",
+                    lat/1000000, abs(lat%1000000), lon/1000000, abs(lon%1000000));
+            }
         } else {
             LOG_RAW("Location: not set\n\r");
         }
@@ -534,6 +538,11 @@ void processCommand(char* cmd) {
         if (h != 0) { sendDirectedPing(h); }
         else { LOG_RAW("Use: ping <hex>\n\r"); }
     }
+    else if (strncmp(cmd, "trace ", 6) == 0) {
+        uint8_t h = (uint8_t)strtoul(cmd + 6, NULL, 16);
+        if (h != 0) { sendDirectedTrace(h); }
+        else { LOG_RAW("Use: trace <hex>\n\r"); }
+    }
     else if (strcmp(cmd, "rssi") == 0) {
         LOG_RAW("RSSI:%d SNR:%d.%02ddB\n\r", lastRssi, lastSnr/4, abs(lastSnr%4)*25);
     }
@@ -728,16 +737,18 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     else if (strcmp(cmd, "identity") == 0) {
         RESP_APPEND("%s %02X\n", nodeIdentity.getNodeName(), nodeIdentity.getNodeHash());
         if (nodeIdentity.hasLocation()) {
-            RESP_APPEND("Loc: %.6f,%.6f\n",
-                nodeIdentity.getLatitude() / 1000000.0f,
-                nodeIdentity.getLongitude() / 1000000.0f);
+            int32_t lat = nodeIdentity.getLatitude();
+            int32_t lon = nodeIdentity.getLongitude();
+            RESP_APPEND("Loc: %ld.%06ld,%ld.%06ld\n",
+                lat/1000000, abs(lat%1000000), lon/1000000, abs(lon%1000000));
         }
     }
     else if (strcmp(cmd, "location") == 0) {
         if (nodeIdentity.hasLocation()) {
-            RESP_APPEND("%.6f,%.6f\n",
-                nodeIdentity.getLatitude() / 1000000.0f,
-                nodeIdentity.getLongitude() / 1000000.0f);
+            int32_t lat = nodeIdentity.getLatitude();
+            int32_t lon = nodeIdentity.getLongitude();
+            RESP_APPEND("%ld.%06ld,%ld.%06ld\n",
+                lat/1000000, abs(lat%1000000), lon/1000000, abs(lon%1000000));
         } else {
             RESP_APPEND("No loc\n");
         }
@@ -849,6 +860,11 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
     else if (strncmp(cmd, "ping ", 5) == 0) {
         uint8_t h = (uint8_t)strtoul(cmd + 5, NULL, 16);
         if (h != 0) { sendDirectedPing(h); RESP_APPEND("ping->%02X\n", h); }
+        else { RESP_APPEND("E:hex\n"); }
+    }
+    else if (strncmp(cmd, "trace ", 6) == 0) {
+        uint8_t h = (uint8_t)strtoul(cmd + 6, NULL, 16);
+        if (h != 0) { sendDirectedTrace(h); RESP_APPEND("trace->%02X\n", h); }
         else { RESP_APPEND("E:hex\n"); }
     }
     else if (strcmp(cmd, "rxboost on") == 0) {
@@ -990,28 +1006,27 @@ uint32_t generateNodeId() {
 }
 
 void calculateTimings() {
-    // Calculate timing based on LoRa settings
-    // tSym = 2^SF / BW (in seconds)
-    float bandwidthHz = MC_BANDWIDTH * 1000.0f;
-    float tSymSec = (float)(1 << MC_SPREADING) / bandwidthHz;
-    float tSymMs = tSymSec * 1000.0f;  // Convert to milliseconds
+    // Calculate timing based on LoRa settings using integer math (microseconds)
+    uint32_t bwHz = (uint32_t)(MC_BANDWIDTH * 1000.0f);
+    // tSym in microseconds: (2^SF * 1000000) / bwHz
+    uint32_t tSymUs = ((uint32_t)(1 << MC_SPREADING) * 1000000UL) / bwHz;
 
-    // Preamble time = (preambleLen + 4.25) * tSym
-    preambleTimeMsec = (uint32_t)((MC_PREAMBLE_LEN + 4.25f) * tSymMs);
+    // Preamble time = (preambleLen + 4.25) * tSym = (preambleLen*4 + 17) * tSym / 4
+    preambleTimeMsec = ((uint32_t)(MC_PREAMBLE_LEN * 4 + 17) * tSymUs) / 4000;
 
-    // Slot time for CSMA (simplified)
-    slotTimeMsec = (uint32_t)(tSymMs * 8.5f + 10);  // ~8.5 symbols + margin
+    // Slot time for CSMA: (8.5 symbols + margin) = (17 * tSym / 2 + 10ms)
+    slotTimeMsec = (17 * tSymUs) / 2000 + 10;
 
     // Max packet time for 255 bytes payload
     // PayloadSymbols = 8 + max(ceil((8*PL - 4*SF + 28 + 16) / (4*SF)) * CR, 0)
-    float payloadBits = 8.0f * 255;  // Max payload
-    float numerator = payloadBits - 4.0f * MC_SPREADING + 28 + 16;
-    float denominator = 4.0f * MC_SPREADING;
-    float numPayloadSym = 8 + max(ceil(numerator / denominator) * MC_CODING_RATE, 0.0f);
+    int32_t num = 8 * 255 - 4 * MC_SPREADING + 28 + 16;
+    int32_t den = 4 * MC_SPREADING;
+    int32_t numPayloadSym = 8;
+    if (num > 0) numPayloadSym += ((num + den - 1) / den) * MC_CODING_RATE;
 
-    // Total packet time = preamble + payload symbols
-    float totalSymbols = (MC_PREAMBLE_LEN + 4.25f) + numPayloadSym;
-    maxPacketTimeMsec = (uint32_t)(totalSymbols * tSymMs) + 50;  // +50ms margin
+    // Total: (preambleLen*4 + 17) * tSym / 4 + payloadSym * tSym
+    uint32_t preambleUs = ((uint32_t)(MC_PREAMBLE_LEN * 4 + 17) * tSymUs) / 4;
+    maxPacketTimeMsec = (preambleUs + (uint32_t)numPayloadSym * tSymUs) / 1000 + 50;
 
     LOG(TAG_RADIO " T: p=%lu s=%lu m=%lu\n\r",
         preambleTimeMsec, slotTimeMsec, maxPacketTimeMsec);
@@ -1023,20 +1038,22 @@ void calculateTimings() {
  * @return Airtime in milliseconds
  */
 uint32_t calculatePacketAirtime(uint16_t packetLen) {
-    float bwHz = getCurrentBandwidth() * 1000.0f;
+    uint32_t bwHz = (uint32_t)(getCurrentBandwidth() * 1000.0f);
     uint8_t sf = getCurrentSpreadingFactor();
     uint8_t cr = getCurrentCodingRate();
-    float tSymMs = (float)(1 << sf) / bwHz * 1000.0f;
+    // tSym in microseconds: (2^SF * 1000000) / bwHz
+    uint32_t tSymUs = ((uint32_t)(1 << sf) * 1000000UL) / bwHz;
 
-    // Preamble time
-    float preamble = (MC_PREAMBLE_LEN + 4.25f) * tSymMs;
+    // Preamble: (preambleLen + 4.25) * tSym = (preambleLen*4 + 17) * tSym / 4
+    uint32_t preambleUs = ((uint32_t)(MC_PREAMBLE_LEN * 4 + 17) * tSymUs) / 4;
 
     // Payload symbols: 8 + max(ceil((8*PL - 4*SF + 28 + 16) / (4*SF)) * CR, 0)
-    float num = 8.0f * packetLen - 4.0f * sf + 28 + 16;
-    float den = 4.0f * sf;
-    float payloadSym = 8 + max(ceil(num / den) * cr, 0.0f);
+    int32_t num = 8 * (int32_t)packetLen - 4 * sf + 28 + 16;
+    int32_t den = 4 * sf;
+    int32_t payloadSym = 8;
+    if (num > 0) payloadSym += ((num + den - 1) / den) * cr;
 
-    return (uint32_t)(preamble + payloadSym * tSymMs) + 1;  // +1ms rounding
+    return (preambleUs + (uint32_t)payloadSym * tSymUs) / 1000 + 1;
 }
 
 uint32_t getTxDelayWeighted(int8_t snr) {
@@ -1199,8 +1216,9 @@ bool transmitPacket(MCPacket* pkt) {
     bool isFlood = pkt->header.isFlood();
     repeaterHelper.recordTx(isFlood);
 
-    // Log packet if enabled
-    packetLogger.log(pkt, true);  // true = TX
+    #ifdef ENABLE_PACKET_LOG
+    packetLogger.log(pkt, true);
+    #endif
 
     radio.finishTransmit();
     dio1Flag = false;
@@ -1335,6 +1353,62 @@ static void sendPong(uint8_t targetHash, MCPacket* rxPkt) {
                                    "%s %d", nodeIdentity.getNodeName(), rxPkt->rssi);
 
     LOG(TAG_PING " PONG -> %02X\n\r", targetHash);
+
+    uint32_t id = getPacketId(&pkt);
+    packetCache.addIfNew(id);
+    txQueue.add(&pkt);
+    txCount++;
+}
+
+void sendDirectedTrace(uint8_t targetHash) {
+    MCPacket pkt;
+    pkt.clear();
+    pkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1);
+
+    uint8_t myHash = nodeIdentity.getNodeHash();
+    pkt.path[0] = myHash;
+    pkt.pathLen = 1;
+
+    // Payload: [destHash][srcHash]['D']['T'][text: "#N name"]
+    pingCounter++;
+    pkt.payload[0] = targetHash;
+    pkt.payload[1] = myHash;
+    pkt.payload[2] = 'D';
+    pkt.payload[3] = 'T';
+    pkt.payloadLen = 4 + snprintf((char*)&pkt.payload[4], MC_MAX_PAYLOAD_SIZE - 4,
+                                   "#%u %s", pingCounter, nodeIdentity.getNodeName());
+
+    LOG(TAG_PING " ~> %02X #%u\n\r", targetHash, pingCounter);
+
+    uint32_t id = getPacketId(&pkt);
+    packetCache.addIfNew(id);
+
+    if (transmitPacket(&pkt)) {
+        LOG(TAG_PING " TX ok\n\r");
+    } else {
+        LOG(TAG_PING " TX fail\n\r");
+    }
+    startReceive();
+}
+
+static void sendTraceResponse(uint8_t targetHash, MCPacket* rxPkt) {
+    MCPacket pkt;
+    pkt.clear();
+    pkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1);
+
+    uint8_t myHash = nodeIdentity.getNodeHash();
+    pkt.path[0] = myHash;
+    pkt.pathLen = 1;
+
+    // Payload: [destHash][srcHash]['T']['R'][text: "name rssi hops"]
+    pkt.payload[0] = targetHash;
+    pkt.payload[1] = myHash;
+    pkt.payload[2] = 'T';
+    pkt.payload[3] = 'R';
+    pkt.payloadLen = 4 + snprintf((char*)&pkt.payload[4], MC_MAX_PAYLOAD_SIZE - 4,
+                                   "%s %d %d", nodeIdentity.getNodeName(), rxPkt->rssi, rxPkt->pathLen);
+
+    LOG(TAG_PING " TR -> %02X\n\r", targetHash);
 
     uint32_t id = getPacketId(&pkt);
     packetCache.addIfNew(id);
@@ -2102,14 +2176,14 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
             {
                 telemetry.update();
                 CayenneLPP lpp(&responseData[responseLen], sizeof(responseData) - responseLen);
-                // Battery voltage (channel 1)
-                lpp.addVoltage(1, telemetry.getBatteryMv() / 1000.0f);
-                // Temperature (channel 2)
-                lpp.addTemperature(2, (float)telemetry.getTemperature());
-                // Node count as analog input (channel 3)
-                lpp.addAnalogInput(3, (float)seenNodes.getCount());
-                // Uptime as analog input in hours (channel 4)
-                lpp.addAnalogInput(4, telemetry.getUptime() / 3600.0f);
+                // Battery voltage (channel 1) - integer mV
+                lpp.addVoltageMv(1, telemetry.getBatteryMv());
+                // Temperature (channel 2) - integer Celsius
+                lpp.addTemperatureInt(2, telemetry.getTemperature());
+                // Node count as analog input (channel 3) - integer
+                lpp.addAnalogInputInt(3, (int16_t)seenNodes.getCount());
+                // Uptime as analog input in hours (channel 4) - integer
+                lpp.addAnalogInputInt(4, (int16_t)(telemetry.getUptime() / 3600));
                 responseLen += lpp.getSize();
             }
             break;
@@ -2388,8 +2462,9 @@ void processReceivedPacket(MCPacket* pkt) {
     repeaterHelper.recordRx(isFlood);
     repeaterHelper.updateRadioStats(pkt->rssi, pkt->snr);
 
-    // Log packet if enabled
-    packetLogger.log(pkt, false);  // false = RX
+    #ifdef ENABLE_PACKET_LOG
+    packetLogger.log(pkt, false);
+    #endif
 
     LOG(TAG_RX " %s %s path=%d len=%d rssi=%ddBm snr=%d.%ddB\n\r",
         mcRouteTypeName(pkt->header.getRouteType()),
@@ -2434,6 +2509,22 @@ void processReceivedPacket(MCPacket* pkt) {
                  && pkt->payload[0] == nodeIdentity.getNodeHash()) {
             // PONG response for us
             LOG(TAG_PING " PONG %02X %s rssi=%d snr=%d.%ddB p=%d\n\r",
+                pkt->payload[1],
+                pkt->payloadLen > 4 ? (char*)&pkt->payload[4] : "",
+                pkt->rssi, pkt->snr / 4, abs(pkt->snr % 4) * 25,
+                pkt->pathLen);
+        }
+        else if (pkt->payloadLen >= 4 && pkt->payload[2] == 'D' && pkt->payload[3] == 'T'
+                 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
+            // Directed TRACE for us - respond with trace response
+            LOG(TAG_PING " TRACE from %02X %s\n\r", pkt->payload[1],
+                pkt->payloadLen > 4 ? (char*)&pkt->payload[4] : "");
+            sendTraceResponse(pkt->payload[1], pkt);
+        }
+        else if (pkt->payloadLen >= 4 && pkt->payload[2] == 'T' && pkt->payload[3] == 'R'
+                 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
+            // Trace response for us
+            LOG(TAG_PING " TRACE %02X %s rssi=%d snr=%d.%ddB p=%d\n\r",
                 pkt->payload[1],
                 pkt->payloadLen > 4 ? (char*)&pkt->payload[4] : "",
                 pkt->rssi, pkt->snr / 4, abs(pkt->snr % 4) * 25,
@@ -2515,7 +2606,10 @@ void processReceivedPacket(MCPacket* pkt) {
             if (advInfo.isRepeater) LOG_RAW(" R");
             if (advInfo.isChatNode) LOG_RAW(" C");
             LOG_RAW(" %02X", advInfo.pubKeyHash);
-            if (advInfo.hasLocation) LOG_RAW(" %.4f,%.4f", advInfo.latitude, advInfo.longitude);
+            if (advInfo.hasLocation) {
+                int32_t lat = advInfo.latitude, lon = advInfo.longitude;
+                LOG_RAW(" %ld.%04ld,%ld.%04ld", lat/1000000, abs(lat%1000000)/100, lon/1000000, abs(lon%1000000)/100);
+            }
             LOG_RAW("\n\r");
 
             // Update seen nodes with pubkey hash and name from ADVERT

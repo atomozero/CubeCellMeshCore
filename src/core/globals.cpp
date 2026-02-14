@@ -248,7 +248,9 @@ TimeSync timeSync;
 AdvertGenerator advertGen;
 TelemetryManager telemetry;
 RepeaterHelper repeaterHelper;
+#ifdef ENABLE_PACKET_LOG
 PacketLogger packetLogger;
+#endif
 SessionManager sessionManager;
 MeshCrypto meshCrypto;
 ContactManager contactMgr;

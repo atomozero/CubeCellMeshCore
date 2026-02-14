@@ -1036,7 +1036,9 @@ public:
 
 //=============================================================================
 // Packet Logger (simplified - stores to RAM ring buffer)
+// Disabled by default to save ~500B Flash + 384B RAM
 //=============================================================================
+#ifdef ENABLE_PACKET_LOG
 
 #define PACKET_LOG_SIZE         32  // Number of log entries (limited RAM)
 
@@ -1186,6 +1188,8 @@ public:
     }
 };
 
+#endif // ENABLE_PACKET_LOG
+
 //=============================================================================
 // CayenneLPP Telemetry Encoder
 //=============================================================================
@@ -1255,6 +1259,54 @@ public:
         int16_t val = (int16_t)(celsius * 10);
         buffer[cursor++] = channel;
         buffer[cursor++] = LPP_TEMPERATURE;
+        buffer[cursor++] = (val >> 8) & 0xFF;
+        buffer[cursor++] = val & 0xFF;
+        return true;
+    }
+
+    /**
+     * Add voltage from millivolts (integer, no float)
+     * @param channel Channel number
+     * @param mv Voltage in millivolts
+     */
+    bool addVoltageMv(uint8_t channel, uint16_t mv) {
+        if (cursor + 4 > maxSize) return false;
+
+        uint16_t val = mv / 10;  // LPP voltage unit is 0.01V = 10mV
+        buffer[cursor++] = channel;
+        buffer[cursor++] = LPP_VOLTAGE;
+        buffer[cursor++] = (val >> 8) & 0xFF;
+        buffer[cursor++] = val & 0xFF;
+        return true;
+    }
+
+    /**
+     * Add temperature from integer Celsius (no float)
+     * @param channel Channel number
+     * @param celsius Temperature in integer Celsius
+     */
+    bool addTemperatureInt(uint8_t channel, int8_t celsius) {
+        if (cursor + 4 > maxSize) return false;
+
+        int16_t val = (int16_t)celsius * 10;  // LPP unit is 0.1C
+        buffer[cursor++] = channel;
+        buffer[cursor++] = LPP_TEMPERATURE;
+        buffer[cursor++] = (val >> 8) & 0xFF;
+        buffer[cursor++] = val & 0xFF;
+        return true;
+    }
+
+    /**
+     * Add analog input from integer value (no float)
+     * @param channel Channel number
+     * @param value Integer value (will be encoded as value * 100 in LPP)
+     */
+    bool addAnalogInputInt(uint8_t channel, int16_t value) {
+        if (cursor + 4 > maxSize) return false;
+
+        int16_t val = value * 100;
+        buffer[cursor++] = channel;
+        buffer[cursor++] = LPP_ANALOG_INPUT;
         buffer[cursor++] = (val >> 8) & 0xFF;
         buffer[cursor++] = val & 0xFF;
         return true;
