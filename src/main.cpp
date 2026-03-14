@@ -1224,7 +1224,7 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
         } else RESP_APPEND("E:HH:MM\n");
     }
 #endif
-    else if (strcmp(cmd, "help") == 0) {
+    else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "?") == 0) {
         RESP_APPEND("status stats time ver clock nodes identity telemetry\n");
         RESP_APPEND("radio location ping rxboost sleep alert powersaving\n");
         RESP_APPEND("set name set lat set lon set tx set advert.interval\n");
