@@ -23,7 +23,7 @@ Key principles:
 - **Default: forward everything** — with no region entries configured, all packets are forwarded
 - **Deny-based** — `REGION_DENY_FLOOD` flag blocks forwarding for a specific region
 - **Flat matching** — regions are matched by full name via cryptographic transport codes (no hierarchy)
-- **Wildcard `*`** = global/legacy scope; controls behavior of legacy `ROUTE_TYPE_FLOOD` packets
+- **Wildcard `*`** = fallback for unscoped packets; forwards only packets **without** a region scope (not all packets)
 - **Applies only to channels** — does not affect direct messages (DMs)
 
 ### What Regions Are NOT
