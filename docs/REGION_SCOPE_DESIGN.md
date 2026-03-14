@@ -17,12 +17,12 @@ This document describes the planned implementation of the **Region** system for 
 
 ### What Regions Are
 
-Regions are a **deny-based flood filtering** mechanism. Each repeater maintains a **RegionMap** — a hierarchical set of named regions, each with flags controlling whether flood packets with matching transport codes should be forwarded or dropped.
+Regions are a **deny-based flood filtering** mechanism. Each repeater maintains a **RegionMap** — a flat set of named regions, each with flags controlling whether flood packets with matching transport codes should be forwarded or dropped.
 
 Key principles:
 - **Default: forward everything** — with no region entries configured, all packets are forwarded
 - **Deny-based** — `REGION_DENY_FLOOD` flag blocks forwarding for a specific region
-- **Hierarchical** — regions form a parent/child tree (e.g., `*` > `AU` > `AU/NSW`)
+- **Flat matching** — regions are matched by full name via cryptographic transport codes (no hierarchy)
 - **Wildcard `*`** = global/legacy scope; controls behavior of legacy `ROUTE_TYPE_FLOOD` packets
 - **Applies only to channels** — does not affect direct messages (DMs)
 
@@ -39,7 +39,7 @@ Region codes follow this convention:
 - **Subdivisions:** UNECE codes with hyphen (e.g., `nl-li`, `au-nsw`)
 - **Valid chars:** alphanumeric, accented chars, `-`, `$`, `#`
 - **Max length:** 31 characters
-- **Separator:** hierarchical parent/child, not slash-encoded in name
+- **Matching:** full string match (or hash), no hierarchical inheritance
 
 ---
 
