@@ -447,7 +447,7 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
     }
     else if (strncmp(cmd, "set flood.max ", 14) == 0) {
         uint8_t hops = atoi(cmd + 14);
-        if (hops >= 1 && hops <= 15) { repeaterHelper.setMaxFloodHops(hops); CP("hops:%d\n", hops); }
+        if (hops >= 1 && hops <= 15) { repeaterHelper.setMaxFloodHops(hops); saveConfig(); CP("hops:%d\n", hops); }
     }
     else if (strcmp(cmd, "get loop.detect") == 0) {
         const char* mode = (loopDetectMode == LOOP_DETECT_OFF) ? "off" :
@@ -538,6 +538,7 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
         uint32_t minutes = strtoul(cmd + 20, NULL, 10);
         if (minutes >= 1 && minutes <= 1440) {
             advertGen.setInterval(minutes * 60000);
+            saveConfig();
             CP("int:%lum\n", minutes);
         } else CP("E:1-1440\n");
     }
@@ -545,6 +546,7 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
         uint32_t interval = strtoul(cmd + 16, NULL, 10);
         if (interval >= 60 && interval <= 86400) {
             advertGen.setInterval(interval * 1000);
+            saveConfig();
             CP("int:%lus\n", interval);
         } else CP("E:60-86400\n");
     }
@@ -740,8 +742,8 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
     }
     else if (strncmp(cmd, "set flood.advert.interval ", 25) == 0) {
         uint32_t hours = strtoul(cmd + 25, NULL, 10);
-        if (hours == 0) { floodAdvertIntervalMs = 0; CP("flood.adv.int:auto\n"); }
-        else if (hours >= 3 && hours <= 48) { floodAdvertIntervalMs = hours * 3600000UL; CP("flood.adv.int:%luh\n", hours); }
+        if (hours == 0) { floodAdvertIntervalMs = 0; saveConfig(); CP("flood.adv.int:auto\n"); }
+        else if (hours >= 3 && hours <= 48) { floodAdvertIntervalMs = hours * 3600000UL; saveConfig(); CP("flood.adv.int:%luh\n", hours); }
         else CP("E:0,3-48\n");
     }
     else if (strncmp(cmd, "set agc.reset.interval ", 23) == 0) {
@@ -828,6 +830,43 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
 #ifndef SILENT
 char cmdBuffer[48];
 uint8_t cmdPos = 0;
+
+// Unified radio param parser for tempradio and set radio
+static void parseAndApplyRadio(const char* args, char sep) {
+    char buf[48];
+    strncpy(buf, args, sizeof(buf) - 1); buf[sizeof(buf)-1] = 0;
+    if (sep == ',') { for (char* q = buf; *q; q++) if (*q == ',') *q = ' '; }
+    char* p = buf;
+    char* tok[5]; uint8_t ti = 0;
+    while (*p && ti < 5) {
+        while (*p == ' ') p++;
+        if (!*p) break;
+        tok[ti++] = p;
+        while (*p && *p != ' ') p++;
+        if (*p) *p++ = 0;
+    }
+    uint32_t freqM, bwT;
+    if (ti >= 4 && parseMHz3(tok[0], &freqM) && parseBW1(tok[1], &bwT)) {
+        int sf = atoi(tok[2]), cr = atoi(tok[3]);
+        if (freqM < 150000 || freqM > 960000) LOG_RAW("E:freq\n\r");
+        else if (bwT < 78 || bwT > 5000) LOG_RAW("E:bw\n\r");
+        else if (sf < 6 || sf > 12) LOG_RAW("E:sf\n\r");
+        else if (cr < 5 || cr > 8) LOG_RAW("E:cr\n\r");
+        else {
+            tempFrequency = freqM / 1000.0f;
+            tempBandwidth = bwT / 10.0f;
+            tempSpreadingFactor = sf; tempCodingRate = cr;
+            tempRadioActive = true;
+            if (ti == 5) {
+                uint32_t mins = strtoul(tok[4], NULL, 10);
+                tempRadioExpireTime = (mins > 0 && mins <= 1440) ? millis() + mins * 60000UL : 0;
+            } else tempRadioExpireTime = 0;
+            setupRadio(); startReceive(); calculateTimings();
+            LOG_RAW("%lu.%03lu BW%lu.%lu SF%d CR%d OK\n\r",
+                freqM/1000, freqM%1000, bwT/10, bwT%10, sf, cr);
+        }
+    } else LOG_RAW("E:<freq> <bw> <sf> <cr>\n\r");
+}
 
 void processCommand(char* cmd) {
     CmdCtx ctx = { NULL, 0, 0 };
@@ -988,96 +1027,25 @@ void processCommand(char* cmd) {
     else if (strncmp(cmd, "tempradio ", 10) == 0) {
         if (strcmp(cmd + 10, "off") == 0) {
             if (tempRadioActive) {
-                tempRadioActive = false;
-                tempRadioExpireTime = 0;
+                tempRadioActive = false; tempRadioExpireTime = 0;
                 setupRadio(); startReceive(); calculateTimings();
-                LOG_RAW("Temp radio off OK\n\r");
-            } else LOG_RAW("Temp radio not active\n\r");
+                LOG_RAW("OK\n\r");
+            } else LOG_RAW("not active\n\r");
         } else {
-            // Parse: freq bw sf cr [minutes] (e.g. "869.618 62.5 8 8 30")
-            char buf[48];
-            strncpy(buf, cmd + 10, sizeof(buf) - 1); buf[sizeof(buf)-1] = 0;
-            char* p = buf;
-            char* tok[5]; uint8_t ti = 0;
-            while (*p && ti < 5) {
-                while (*p == ' ') p++;
-                if (!*p) break;
-                tok[ti++] = p;
-                while (*p && *p != ' ') p++;
-                if (*p) *p++ = 0;
-            }
-            uint32_t freqM, bwT;
-            if (ti >= 4 && parseMHz3(tok[0], &freqM) && parseBW1(tok[1], &bwT)) {
-                int sf = atoi(tok[2]), cr = atoi(tok[3]);
-                if (freqM < 150000 || freqM > 960000) LOG_RAW("E:freq\n\r");
-                else if (bwT < 78 || bwT > 5000) LOG_RAW("E:bw\n\r");
-                else if (sf < 6 || sf > 12) LOG_RAW("E:sf\n\r");
-                else if (cr < 5 || cr > 8) LOG_RAW("E:cr\n\r");
-                else {
-                    tempFrequency = freqM / 1000.0f;
-                    tempBandwidth = bwT / 10.0f;
-                    tempSpreadingFactor = sf; tempCodingRate = cr;
-                    tempRadioActive = true;
-                    if (ti == 5) {
-                        uint32_t mins = strtoul(tok[4], NULL, 10);
-                        if (mins > 0 && mins <= 1440)
-                            tempRadioExpireTime = millis() + mins * 60000UL;
-                        else tempRadioExpireTime = 0;
-                    } else tempRadioExpireTime = 0;
-                    setupRadio(); startReceive(); calculateTimings();
-                    LOG_RAW("Tmp: %lu.%03lu BW%lu.%lu SF%d CR%d OK\n\r",
-                        freqM/1000, freqM%1000, bwT/10, bwT%10, sf, cr);
-                }
-            } else LOG_RAW("tempradio <freq> <bw> <sf> <cr> [min] | off\n\r");
+            parseAndApplyRadio(cmd + 10, ' ');
         }
     }
     else if (strcmp(cmd, "tempradio") == 0) {
         if (tempRadioActive) {
-            // Convert back to integer display
             uint32_t fM = (uint32_t)(tempFrequency * 1000);
             uint32_t bT = (uint32_t)(tempBandwidth * 10);
-            LOG_RAW("Tmp: %lu.%03lu BW%lu.%lu SF%d CR%d [ON]\n\r",
+            LOG_RAW("%lu.%03lu BW%lu.%lu SF%d CR%d\n\r",
                 fM/1000, fM%1000, bT/10, bT%10, tempSpreadingFactor, tempCodingRate);
         }
-        else LOG_RAW("Tmp radio off\n\r");
+        else LOG_RAW("off\n\r");
     }
-    // set radio <freq>,<bw>,<sf>,<cr>[,minutes] - persistent radio config (comma-separated)
     else if (strncmp(cmd, "set radio ", 10) == 0) {
-        char buf[48];
-        strncpy(buf, cmd + 10, sizeof(buf) - 1); buf[sizeof(buf)-1] = 0;
-        for (char* p = buf; *p; p++) { if (*p == ',') *p = ' '; }
-        char* p = buf;
-        char* tok[5]; uint8_t ti = 0;
-        while (*p && ti < 5) {
-            while (*p == ' ') p++;
-            if (!*p) break;
-            tok[ti++] = p;
-            while (*p && *p != ' ') p++;
-            if (*p) *p++ = 0;
-        }
-        uint32_t freqM, bwT;
-        if (ti >= 4 && parseMHz3(tok[0], &freqM) && parseBW1(tok[1], &bwT)) {
-            int sf = atoi(tok[2]), cr = atoi(tok[3]);
-            if (freqM < 150000 || freqM > 960000) LOG_RAW("E:freq\n\r");
-            else if (bwT < 78 || bwT > 5000) LOG_RAW("E:bw\n\r");
-            else if (sf < 6 || sf > 12) LOG_RAW("E:sf\n\r");
-            else if (cr < 5 || cr > 8) LOG_RAW("E:cr\n\r");
-            else {
-                tempFrequency = freqM / 1000.0f;
-                tempBandwidth = bwT / 10.0f;
-                tempSpreadingFactor = sf; tempCodingRate = cr;
-                tempRadioActive = true;
-                if (ti == 5) {
-                    uint32_t mins = strtoul(tok[4], NULL, 10);
-                    if (mins > 0 && mins <= 1440)
-                        tempRadioExpireTime = millis() + mins * 60000UL;
-                    else tempRadioExpireTime = 0;
-                } else tempRadioExpireTime = 0;
-                setupRadio(); startReceive(); calculateTimings();
-                LOG_RAW("Radio: %lu.%03lu BW%lu.%lu SF%d CR%d OK\n\r",
-                    freqM/1000, freqM%1000, bwT/10, bwT%10, sf, cr);
-            }
-        } else LOG_RAW("set radio <freq>,<bw>,<sf>,<cr>[,min]\n\r");
+        parseAndApplyRadio(cmd + 10, ',');
     }
 #ifdef ENABLE_DAILY_REPORT
     else if (strcmp(cmd, "report") == 0) {

@@ -32,7 +32,10 @@ const NodeConfig defaultConfig = {
     {0},    // alertDestPubKey (empty)
     LOOP_DETECT_STRICT,  // loopDetectMode (default: strict for backward compat)
     0,      // autoAddMaxHops (default: no limit)
-    {0}     // reserved
+    0,      // maxFloodHops (0=default 8)
+    0,      // advertIntervalMin (0=default 5)
+    0,      // floodAdvertHrs (0=auto)
+    0       // reserved1
 };
 
 //=============================================================================
@@ -75,11 +78,17 @@ void loadConfig() {
         autoAddMaxHops = config.autoAddMaxHops;
         if (autoAddMaxHops > 64) autoAddMaxHops = 64;
 
-        CONFIG_LOG("[C] Loaded (report=%s, alert=%s, loopDetect=%d, autoAddMaxHops=%d)\n\r",
+        // Load flood/advert settings (0=use hardcoded default)
+        if (config.maxFloodHops > 0 && config.maxFloodHops <= 15)
+            repeaterHelper.setMaxFloodHops(config.maxFloodHops);
+        if (config.advertIntervalMin > 0)
+            advertGen.setInterval((uint32_t)config.advertIntervalMin * 60000UL);
+        if (config.floodAdvertHrs >= 3 && config.floodAdvertHrs <= 48)
+            floodAdvertIntervalMs = (uint32_t)config.floodAdvertHrs * 3600000UL;
+
+        CONFIG_LOG("[C] Loaded (report=%s, alert=%s)\n\r",
             reportEnabled ? "on" : "off",
-            alertEnabled ? "on" : "off",
-            loopDetectMode,
-            autoAddMaxHops);
+            alertEnabled ? "on" : "off");
     } else {
         // First boot or version mismatch - use defaults
         powerSaveMode = defaultConfig.powerSaveMode;
@@ -141,7 +150,12 @@ void saveConfig() {
     // Save auto-add max hops
     config.autoAddMaxHops = autoAddMaxHops;
 
-    memset(config.reserved, 0, sizeof(config.reserved));
+    // Save flood/advert settings
+    config.maxFloodHops = repeaterHelper.getMaxFloodHops();
+    uint32_t advMs = advertGen.getInterval();
+    config.advertIntervalMin = (advMs / 60000UL) > 255 ? 255 : (uint8_t)(advMs / 60000UL);
+    config.floodAdvertHrs = floodAdvertIntervalMs > 0 ? (uint8_t)(floodAdvertIntervalMs / 3600000UL) : 0;
+    config.reserved1 = 0;
 
     EEPROM.put(0, config);
     if (EEPROM.commit()) {

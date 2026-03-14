@@ -56,7 +56,10 @@ struct NodeConfig {
     uint8_t alertDestPubKey[REPORT_PUBKEY_SIZE];
     uint8_t loopDetectMode;   // 0=off, 1=minimal, 2=moderate, 3=strict
     uint8_t autoAddMaxHops;   // 0=no limit, 1-64=max hops for auto-add contacts
-    uint8_t reserved[4];      // Reserved for future use
+    uint8_t maxFloodHops;       // 0=default(8), 1-15=max flood hops
+    uint8_t advertIntervalMin;  // 0=default(5), 1-240=advert interval in minutes
+    uint8_t floodAdvertHrs;     // 0=auto, 3-48=flood advert interval in hours
+    uint8_t reserved1;          // Reserved for future use
 };
 #endif
 
