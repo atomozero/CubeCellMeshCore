@@ -150,21 +150,28 @@ If a matching region has `REGION_DENY_FLOOD` set, return NULL (= block).
 
 ---
 
-## CLI Commands (MeshCore Reference)
+## CLI Commands
+
+### CubeCellMeshCore (implemented)
 
 | Command | Description |
 |---------|-------------|
-| `region` | List all defined regions and flood permissions (serial only) |
+| `region` | List wildcard and all entries with flood status (A/D) |
+| `region put {name}` | Add region entry (admin only) |
+| `region remove {name}` | Remove region entry (admin only) |
+| `region allowf {* \| name}` | Allow flood forwarding for region or wildcard (admin only) |
+| `region denyf {* \| name}` | Deny flood forwarding for region or wildcard (admin only) |
+| `region save` | Persist region map to EEPROM (admin only) |
+| `region load` | Load region map from EEPROM (admin only, also at boot) |
+
+### MeshCore upstream (not implemented in CubeCell)
+
+| Command | Description |
+|---------|-------------|
 | `region get {* \| name}` | Show region name, parent, flood status |
-| `region put {name} {* \| parent}` | Add/update region definition |
-| `region remove {name}` | Remove region (must have no children) |
-| `region allowf {* \| name}` | Allow flood forwarding for region |
-| `region denyf {* \| name}` | Deny flood forwarding (avoid on `*`) |
-| `region home` | Show current home region |
-| `region home {* \| name}` | Set home region |
+| `region put {name} {* \| parent}` | Add/update with parent reference |
+| `region home` / `region home {name}` | Get/set home region |
 | `region list {allowed\|denied}` | List regions by flood permission |
-| `region save` | Persist region map to storage |
-| `region load` | Load region hierarchy via serial (multi-line) |
 
 ---
 
