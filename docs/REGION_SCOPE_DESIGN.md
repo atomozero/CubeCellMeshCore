@@ -2,14 +2,14 @@
 
 **Version:** 0.8.0 (planned)
 **MeshCore Compatibility:** 1.10.0+
-**Status:** Design Phase - Not yet implemented
+**Status:** Implemented (Phase 1-5 done, Phase 6 testing TODO)
 **Author:** Andrea Bernardi
 
 ---
 
 ## Overview
 
-This document describes the planned implementation of the **Region** system for CubeCellMeshCore, aligned with the actual MeshCore protocol as found in the upstream source code.
+This document describes the implementation of the **Region** system for CubeCellMeshCore, aligned with the actual MeshCore protocol as found in the upstream source code.
 
 ---
 
