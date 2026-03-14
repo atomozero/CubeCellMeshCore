@@ -314,6 +314,12 @@ Per [Issue #1747](https://github.com/meshcore-dev/MeshCore/issues/1747):
 
 ## Changelog
 
+### 2026-03-14 v3 - Fix incorrect protocol descriptions (Issue #5 feedback)
+- Removed incorrect hierarchical matching references — MeshCore uses flat matching
+- Corrected wildcard `*` behavior: forwards only unscoped packets, not all
+- Updated document status to reflect implementation progress (Phase 1-5 done)
+- Separated implemented CLI commands from upstream-only ones
+
 ### 2026-03-06 v2 - Corrected with upstream source code analysis
 - Transport codes are uint16_t[2] (4 bytes on wire), not UTF-8 strings
 - Transport codes are cryptographic: HMAC-SHA256(SHA256(name), payload) → 2 bytes
