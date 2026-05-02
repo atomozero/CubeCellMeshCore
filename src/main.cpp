@@ -3311,8 +3311,18 @@ void loop() {
                     if (pkt.deserialize(buf, len)) {
                         processReceivedPacket(&pkt);
                     } else {
-                        // Debug: show raw packet info
-                        LOG(TAG_ERROR " Bad pkt l=%d h=%02X\n\r", len, buf[0]);
+                        // Decode header for better diagnostics
+                        if (len > 0) {
+                            uint8_t route = buf[0] & 0x03;
+                            uint8_t type = (buf[0] >> 2) & 0x0F;
+                            uint8_t ver = (buf[0] >> 6) & 0x03;
+                            // Show pathLen byte if available for debugging
+                            uint8_t pathLenByte = (len > 1) ? buf[1] : 0;
+                            LOG(TAG_ERROR " Bad pkt l=%d h=%02X(r=%d,t=%d,v=%d) pL=%d\n\r",
+                                len, buf[0], route, type, ver, pathLenByte);
+                        } else {
+                            LOG(TAG_ERROR " Bad pkt l=%d\n\r", len);
+                        }
                         errCount++;
                     }
                 } else if (radioError == RADIOLIB_ERR_CRC_MISMATCH) {

@@ -181,9 +181,11 @@ struct MCPacket {
         if (pos >= len) return false;
         pathLen = buf[pos++];
 
+        // Validate pathLen
         if (pathLen > MC_MAX_PATH_SIZE) return false;
         if (pos + pathLen > len) return false;
 
+        // Copy path data
         if (pathLen > 0) {
             memcpy(path, &buf[pos], pathLen);
             pos += pathLen;

@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>CubeCellMeshCore v0.5.2 - Guida Comandi</title>
+<style>
+  @page {
+    size: A4;
+    margin: 20mm 18mm 22mm 18mm;
+    @bottom-center {
+      content: "CubeCellMeshCore v0.5.2 — Guida Comandi";
+      font-size: 8pt;
+      color: #94a3b8;
+      font-family: 'Inter', 'Segoe UI', sans-serif;
+    }
+    @bottom-right {
+      content: counter(page) " / " counter(pages);
+      font-size: 8pt;
+      color: #94a3b8;
+      font-family: 'Inter', 'Segoe UI', sans-serif;
+    }
+  }
+
+  @page coverpage {
+    margin: 0;
+    @bottom-center { content: none; }
+    @bottom-right { content: none; }
+  }
+
+  :root {
+    --primary: #1e3a5f;
+    --primary-light: #2d5a8e;
+    --accent: #0ea5e9;
+    --accent-soft: #e0f2fe;
+    --success: #10b981;
+    --success-bg: #ecfdf5;
+    --warning: #f59e0b;
+    --warning-bg: #fffbeb;
+    --danger: #ef4444;
+    --danger-bg: #fef2f2;
+    --gray-50: #f8fafc;
+    --gray-100: #f1f5f9;
+    --gray-200: #e2e8f0;
+    --gray-300: #cbd5e1;
+    --gray-500: #64748b;
+    --gray-700: #334155;
+    --gray-900: #0f172a;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    font-size: 9.5pt;
+    line-height: 1.55;
+    color: var(--gray-700);
+  }
+
+  /* COVER PAGE - WeasyPrint compatible */
+  .cover {
+    page: coverpage;
+    page-break-after: always;
+    width: 210mm;
+    height: 297mm;
+    margin: 0;
+    padding: 0;
+    background: #1e3a5f;
+    color: white;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .cover-bg {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(160deg, #1e3a5f 0%, #0c2340 60%, #091a30 100%);
+  }
+
+  /* Decorative geometric accent */
+  .cover-accent {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 8mm;
+    background: #0ea5e9;
+  }
+
+  .cover-accent-line {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3mm;
+    background: #0ea5e9;
+  }
+
+  .cover-content {
+    position: relative;
+    z-index: 1;
+    padding-top: 80mm;
+  }
+
+  .cover-logo {
+    width: 80px;
+    height: 80px;
+    border: 3px solid rgba(255,255,255,0.25);
+    border-radius: 18px;
+    margin: 0 auto 24px auto;
+    line-height: 80px;
+    font-size: 30pt;
+    font-weight: 700;
+    background: rgba(255,255,255,0.07);
+    letter-spacing: 2px;
+  }
+
+  .cover .version-badge {
+    display: inline-block;
+    background: #0ea5e9;
+    color: white;
+    padding: 5px 22px;
+    border-radius: 20px;
+    font-size: 11pt;
+    font-weight: 600;
+    margin-bottom: 18px;
+  }
+
+  .cover h1 {
+    font-size: 30pt;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 6px;
+    color: white;
+  }
+
+  .cover .subtitle {
+    font-size: 13pt;
+    font-weight: 300;
+    color: rgba(255,255,255,0.70);
+    margin-bottom: 30px;
+  }
+
+  .cover .desc {
+    font-size: 10pt;
+    color: rgba(255,255,255,0.50);
+    margin-bottom: 50px;
+  }
+
+  .cover .meta-box {
+    display: inline-block;
+    text-align: left;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    padding: 14px 28px;
+    font-size: 9pt;
+    color: rgba(255,255,255,0.50);
+    line-height: 1.8;
+  }
+
+  .cover .meta-box strong {
+    color: rgba(255,255,255,0.75);
+  }
+
+  /* TOC */
+  .toc {
+    page-break-after: always;
+  }
+
+  .toc h2 {
+    font-size: 18pt;
+    color: var(--primary);
+    margin-bottom: 20px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--accent);
+  }
+
+  .toc ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .toc li {
+    padding: 6px 0;
+    border-bottom: 1px dotted var(--gray-200);
+    font-size: 10pt;
+  }
+
+  .toc li .num {
+    display: inline-block;
+    width: 28px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* SECTION HEADERS */
+  h2 {
+    font-size: 16pt;
+    color: var(--primary);
+    font-weight: 700;
+    margin-top: 28px;
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--accent);
+    page-break-after: avoid;
+  }
+
+  h3 {
+    font-size: 11pt;
+    color: var(--primary-light);
+    font-weight: 600;
+    margin-top: 18px;
+    margin-bottom: 8px;
+    page-break-after: avoid;
+  }
+
+  h4 {
+    font-size: 10pt;
+    color: var(--gray-700);
+    font-weight: 600;
+    margin-top: 12px;
+    margin-bottom: 6px;
+  }
+
+  p {
+    margin-bottom: 8px;
+  }
+
+  /* TABLES */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 14px;
+    font-size: 8.5pt;
+    page-break-inside: avoid;
+  }
+
+  thead th {
+    background: #1e3a5f;
+    color: white;
+    font-weight: 600;
+    text-align: left;
+    padding: 7px 10px;
+    font-size: 8.5pt;
+    letter-spacing: 0.3px;
+  }
+
+  thead th:first-child { border-radius: 6px 0 0 0; }
+  thead th:last-child { border-radius: 0 6px 0 0; }
+
+  tbody td {
+    padding: 6px 10px;
+    border-bottom: 1px solid #f1f5f9;
+    vertical-align: top;
+  }
+
+  tbody tr:nth-child(even) { background: #f8fafc; }
+
+  /* CODE */
+  code {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 8pt;
+    background: #f1f5f9;
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: #1e3a5f;
+  }
+
+  pre {
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 8pt;
+    line-height: 1.5;
+    margin-bottom: 12px;
+    overflow-x: auto;
+    page-break-inside: avoid;
+  }
+
+  pre code {
+    background: none;
+    padding: 0;
+    color: inherit;
+  }
+
+  /* INFO BOXES */
+  .box {
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 14px;
+    page-break-inside: avoid;
+  }
+
+  .box-title {
+    font-weight: 600;
+    font-size: 9.5pt;
+    margin-bottom: 4px;
+  }
+
+  .box-tip {
+    background: #e0f2fe;
+    border-left: 4px solid #0ea5e9;
+  }
+
+  .box-tip .box-title { color: #0369a1; }
+
+  .box-success {
+    background: #ecfdf5;
+    border-left: 4px solid #10b981;
+  }
+
+  .box-success .box-title { color: #065f46; }
+
+  .box-warning {
+    background: #fffbeb;
+    border-left: 4px solid #f59e0b;
+  }
+
+  .box-warning .box-title { color: #92400e; }
+
+  .box-danger {
+    background: #fef2f2;
+    border-left: 4px solid #ef4444;
+  }
+
+  .box-danger .box-title { color: #991b1b; }
+
+  /* PROFILE CARDS */
+  .profile-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    page-break-inside: avoid;
+  }
+
+  .profile-card h4 {
+    margin-top: 0;
+    font-size: 12pt;
+    color: #1e3a5f;
+  }
+
+  .profile-card .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 7.5pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  }
+
+  .badge-perf { background: #dbeafe; color: #1e40af; }
+  .badge-save { background: #dcfce7; color: #166534; }
+  .badge-bal  { background: #fef3c7; color: #92400e; }
+
+  /* CMD-LIST: white text on dark background for readability */
+  .cmd-list {
+    background: #1e293b;
+    color: #f1f5f9;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 8pt;
+    padding: 10px 14px;
+    border-radius: 6px;
+    margin-top: 8px;
+    line-height: 1.7;
+  }
+
+  /* UTILITIES */
+  .two-col {
+    display: flex;
+    gap: 16px;
+  }
+
+  .two-col > div { flex: 1; }
+
+  .small { font-size: 8pt; color: #64748b; }
+  .break-before { page-break-before: always; }
+  .no-break { page-break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<!-- =================== COVER =================== -->
+<div class="cover">
+  <div class="cover-bg"></div>
+  <div class="cover-accent-line"></div>
+  <div class="cover-accent"></div>
+  <div class="cover-content">
+    <div class="cover-logo">MC</div>
+    <div class="version-badge">v0.5.2</div>
+    <h1>CubeCellMeshCore</h1>
+    <p class="subtitle">Guida Completa ai Comandi e alla Configurazione</p>
+    <p class="desc">
+      Firmware MeshCore per Heltec CubeCell HTCC-AB01<br>
+      LoRa Mesh Repeater &bull; EU868
+    </p>
+    <div class="meta-box">
+      <strong>Hardware:</strong> ASR6501 (Cortex-M0+ @ 48 MHz + SX1262)<br>
+      <strong>Banda:</strong> EU868 &mdash; 869.618 MHz<br>
+      <strong>Documento:</strong> Febbraio 2026
+    </div>
+  </div>
+</div>
+
+<!-- =================== TOC =================== -->
+<div class="toc">
+  <h2>Indice</h2>
+  <ul>
+    <li><span class="num">1</span> Panoramica Hardware e Radio</li>
+    <li><span class="num">2</span> Primo Avvio e Configurazione Base</li>
+    <li><span class="num">3</span> Comandi di Stato e Informazioni</li>
+    <li><span class="num">4</span> Configurazione del Nodo</li>
+    <li><span class="num">5</span> Radio e Potenza TX</li>
+    <li><span class="num">6</span> ADVERT e Rete Mesh</li>
+    <li><span class="num">7</span> Password e Sicurezza</li>
+    <li><span class="num">8</span> Mailbox Store-and-Forward</li>
+    <li><span class="num">9</span> Health Monitor e Alert</li>
+    <li><span class="num">10</span> Report Giornaliero</li>
+    <li><span class="num">11</span> Quiet Hours e Circuit Breaker</li>
+    <li><span class="num">12</span> Rate Limiting</li>
+    <li><span class="num">13</span> Statistiche e Manutenzione</li>
+    <li><span class="num">14</span> Comandi di Sistema</li>
+    <li><span class="num">15</span> Comandi Solo Seriale</li>
+    <li><span class="num">16</span> Accesso Remoto (MeshCore App)</li>
+    <li><span class="num">17</span> Profili di Configurazione</li>
+    <li><span class="num">18</span> Quick Reference</li>
+  </ul>
+</div>
+
+<!-- =================== 1. PANORAMICA =================== -->
+<h2>1. Panoramica Hardware e Radio</h2>
+
+<div class="two-col">
+  <div>
+    <h3>Hardware</h3>
+    <table>
+      <tbody>
+        <tr><td><strong>Scheda</strong></td><td>Heltec CubeCell HTCC-AB01</td></tr>
+        <tr><td><strong>MCU</strong></td><td>ASR6501 &mdash; ARM Cortex-M0+ @ 48 MHz</td></tr>
+        <tr><td><strong>Radio</strong></td><td>Semtech SX1262 (integrato nel SiP)</td></tr>
+        <tr><td><strong>Flash</strong></td><td>128 KB (97.7% utilizzata)</td></tr>
+        <tr><td><strong>RAM</strong></td><td>16 KB (49.7% statica, ~4 KB liberi a runtime)</td></tr>
+        <tr><td><strong>Deep Sleep</strong></td><td>~3.5 &micro;A</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>Parametri Radio Default (EU868)</h3>
+    <table>
+      <tbody>
+        <tr><td><strong>Frequenza</strong></td><td>869.618 MHz</td></tr>
+        <tr><td><strong>Bandwidth</strong></td><td>62.5 kHz</td></tr>
+        <tr><td><strong>Spreading Factor</strong></td><td>SF8</td></tr>
+        <tr><td><strong>Coding Rate</strong></td><td>4/8</td></tr>
+        <tr><td><strong>Potenza TX</strong></td><td>14 dBm (max)</td></tr>
+        <tr><td><strong>Sync Word</strong></td><td>0x12</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="box box-tip">
+  <div class="box-title">Connessione Seriale</div>
+  Collegare via USB e aprire un terminale a <code>115200 baud</code>. Digitare <code>help</code> per la lista comandi.
+</div>
+
+<!-- =================== 2. PRIMO AVVIO =================== -->
+<h2>2. Primo Avvio e Configurazione Base</h2>
+
+<p>Dopo il flash del firmware, il nodo genera automaticamente un'identit&agrave; Ed25519. Procedere con la configurazione minima:</p>
+
+<div class="cmd-list">
+set name MioRepeater<br>
+set lat 45.464161<br>
+set lon 9.191383<br>
+password MiaPasswordAdmin<br>
+set guest.password MiaPasswordGuest<br>
+save
+</div>
+
+<div class="box box-warning" style="margin-top:12px;">
+  <div class="box-title">Importante</div>
+  Eseguire sempre <code>save</code> dopo ogni modifica per rendere permanenti le impostazioni in EEPROM.
+</div>
+
+<!-- =================== 3. STATO E INFO =================== -->
+<h2 class="break-before">3. Comandi di Stato e Informazioni</h2>
+
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>help</code></td><td>Mostra la lista comandi disponibili</td></tr>
+    <tr><td><code>status</code></td><td>Versione firmware, nome/hash nodo, uptime, stato sincronizzazione tempo</td></tr>
+    <tr><td><code>stats</code></td><td>Contatori sessione: RX/TX/FWD/ERR, ADV TX/RX, lunghezza coda</td></tr>
+    <tr><td><code>stats-core</code></td><td>Batteria (V e %), uptime, stato coda</td></tr>
+    <tr><td><code>stats-radio</code></td><td>Alias di <code>radiostats</code></td></tr>
+    <tr><td><code>stats-packets</code></td><td>Alias di <code>packetstats</code></td></tr>
+    <tr><td><code>ver</code></td><td>Versione firmware</td></tr>
+    <tr><td><code>board</code></td><td>Nome scheda hardware (HTCC-AB01)</td></tr>
+    <tr><td><code>clock</code> / <code>time</code></td><td>Ora corrente e stato sincronizzazione</td></tr>
+    <tr><td><code>lifetime</code></td><td>Statistiche persistenti: avvii, uptime totale, RX/TX/FWD</td></tr>
+    <tr><td><code>radiostats</code></td><td>Noise floor, ultimo RSSI/SNR, airtime TX/RX</td></tr>
+    <tr><td><code>packetstats</code></td><td>Dettaglio pacchetti: flood/direct RX/TX</td></tr>
+    <tr><td><code>telemetry</code></td><td>Batteria mV/%, uptime</td></tr>
+    <tr><td><code>identity</code></td><td>Nome nodo, hash, posizione, chiave pubblica</td></tr>
+    <tr><td><code>location</code></td><td>Coordinate GPS correnti (sola lettura)</td></tr>
+    <tr><td><code>nodes</code></td><td>Nodi scoperti (hash, nome, RSSI, SNR, pacchetti, ultimo visto)</td></tr>
+    <tr><td><code>nodes &lt;pagina&gt;</code></td><td>Lista nodi paginata (3 per pagina: <code>nodes 0</code>, <code>nodes 1</code>, ...)</td></tr>
+    <tr><td><code>contacts</code></td><td>Contatti noti con chiavi pubbliche (solo seriale)</td></tr>
+    <tr><td><code>neighbours</code></td><td>Ripetitori vicini diretti (ADVERT a 0 hop)</td></tr>
+    <tr><td><code>health</code></td><td>Dashboard: uptime, batteria, rete, mailbox, alert, nodi problematici</td></tr>
+    <tr><td><code>mailbox</code></td><td>Stato mailbox store-and-forward</td></tr>
+    <tr><td><code>power</code></td><td>Modalit&agrave; potenza, RX boost, stato deep sleep</td></tr>
+    <tr><td><code>powersaving</code></td><td>Modalit&agrave; risparmio energetico corrente (0/1/2)</td></tr>
+    <tr><td><code>radio</code></td><td>Parametri radio correnti</td></tr>
+    <tr><td><code>rssi</code></td><td>Ultimo RSSI e SNR ricevuti</td></tr>
+    <tr><td><code>acl</code></td><td>Password admin/guest e sessioni attive</td></tr>
+  </tbody>
+</table>
+
+<h3>Comandi GET (lettura parametri)</h3>
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>get name</code></td><td>Nome nodo corrente</td></tr>
+    <tr><td><code>get lat</code></td><td>Latitudine corrente</td></tr>
+    <tr><td><code>get lon</code></td><td>Longitudine corrente</td></tr>
+    <tr><td><code>get tx</code></td><td>Potenza TX corrente</td></tr>
+    <tr><td><code>get freq</code></td><td>Frequenza radio corrente</td></tr>
+    <tr><td><code>get radio</code></td><td>Parametri radio completi</td></tr>
+    <tr><td><code>get repeat</code></td><td>Stato ripetizione e max hop</td></tr>
+    <tr><td><code>get flood.max</code></td><td>Massimo hop flood</td></tr>
+    <tr><td><code>get advert.interval</code></td><td>Intervallo ADVERT (minuti)</td></tr>
+    <tr><td><code>get guest.password</code></td><td>Password guest</td></tr>
+    <tr><td><code>get public.key</code></td><td>Chiave pubblica (hex, solo seriale)</td></tr>
+    <tr><td><code>get owner.info</code></td><td>Informazioni proprietario nodo</td></tr>
+    <tr><td><code>get af</code></td><td>Fattore airtime/duty-cycle (decimi: 10=1.0x)</td></tr>
+    <tr><td><code>get adc.multiplier</code></td><td>Calibrazione ADC batteria (decimi: 10=1.0x)</td></tr>
+    <tr><td><code>get txdelay</code></td><td>Fattore ritardo TX jitter (0-500, default 100)</td></tr>
+    <tr><td><code>get rxdelay</code></td><td>Fattore ritardo RX (0-500, default 100)</td></tr>
+    <tr><td><code>get direct.txdelay</code></td><td>Fattore ritardo TX diretto (0-500, default 100)</td></tr>
+    <tr><td><code>get agc.reset.interval</code></td><td>Intervallo reset AGC in secondi (0=disabilitato)</td></tr>
+    <tr><td><code>get flood.advert.interval</code></td><td>Intervallo ADVERT flood in ore (0=auto)</td></tr>
+    <tr><td><code>get prv.key</code></td><td>Esporta seed Ed25519 (64 char hex, solo seriale)</td></tr>
+  </tbody>
+</table>
+
+<!-- =================== 4. CONFIG NODO =================== -->
+<h2 class="break-before">4. Configurazione del Nodo</h2>
+
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>set name &lt;nome&gt;</code></td><td>Nome nodo (1-15 caratteri), salvato in EEPROM</td></tr>
+    <tr><td><code>set lat &lt;latitudine&gt;</code></td><td>Latitudine decimale (es. <code>45.123456</code>)</td></tr>
+    <tr><td><code>set lon &lt;longitudine&gt;</code></td><td>Longitudine decimale (es. <code>7.654321</code>)</td></tr>
+    <tr><td><code>set repeat on|off</code></td><td>Abilita/disabilita ripetizione pacchetti</td></tr>
+    <tr><td><code>set flood.max &lt;n&gt;</code></td><td>Max hop flood (1-15)</td></tr>
+    <tr><td><code>set owner.info &lt;testo&gt;</code></td><td>Info proprietario (max 31 caratteri)</td></tr>
+    <tr><td><code>set af &lt;n&gt;</code></td><td>Fattore airtime (decimi: 0=off, 10=1.0x, max 90=9.0x)</td></tr>
+    <tr><td><code>set adc.multiplier &lt;n&gt;</code></td><td>Moltiplicatore ADC batteria (decimi: 0=auto, 10=1.0x)</td></tr>
+    <tr><td><code>set txdelay &lt;n&gt;</code></td><td>Ritardo TX jitter (0-500, default 100)</td></tr>
+    <tr><td><code>set rxdelay &lt;n&gt;</code></td><td>Ritardo RX (0-500, default 100)</td></tr>
+    <tr><td><code>set direct.txdelay &lt;n&gt;</code></td><td>Ritardo TX diretto (0-500, default 100)</td></tr>
+    <tr><td><code>set agc.reset.interval &lt;sec&gt;</code></td><td>Intervallo reset AGC (0=off, multipli di 4)</td></tr>
+    <tr><td><code>set flood.advert.interval &lt;ore&gt;</code></td><td>Intervallo ADVERT flood (0=auto, 3-48h)</td></tr>
+    <tr><td><code>nodetype chat|repeater</code></td><td>Tipo nodo (solo seriale)</td></tr>
+  </tbody>
+</table>
+
+<h3>Gestione Energetica</h3>
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>mode 0</code></td><td><strong>Performance</strong> &mdash; Massime prestazioni, consumo pi&ugrave; alto</td></tr>
+    <tr><td><code>mode 1</code></td><td><strong>Balanced</strong> &mdash; Bilanciamento prestazioni/consumo</td></tr>
+    <tr><td><code>mode 2</code></td><td><strong>Power Save</strong> &mdash; Massimo risparmio energetico</td></tr>
+    <tr><td><code>powersaving on</code></td><td>Scorciatoia per <code>mode 2</code></td></tr>
+    <tr><td><code>powersaving off</code></td><td>Scorciatoia per <code>mode 0</code></td></tr>
+    <tr><td><code>sleep on|off</code></td><td>Abilita/disabilita deep sleep</td></tr>
+    <tr><td><code>rxboost on|off</code></td><td>Abilita/disabilita guadagno RX potenziato</td></tr>
+  </tbody>
+</table>
+
+<!-- =================== 5. RADIO =================== -->
+<h2>5. Radio e Potenza TX</h2>
+
+<h3>Configurazione Radio</h3>
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>radio</code> / <code>get radio</code></td><td>Mostra parametri radio correnti</td></tr>
+    <tr><td><code>get freq</code></td><td>Mostra solo la frequenza corrente</td></tr>
+    <tr><td><code>set freq &lt;MHz&gt;</code></td><td>Imposta frequenza (attiva radio temporanea)</td></tr>
+    <tr><td><code>set radio &lt;f&gt;,&lt;bw&gt;,&lt;sf&gt;,&lt;cr&gt;</code></td><td>Imposta tutti i parametri radio (separati da virgola)</td></tr>
+    <tr><td><code>set radio &lt;f&gt;,&lt;bw&gt;,&lt;sf&gt;,&lt;cr&gt;,&lt;min&gt;</code></td><td>Imposta radio con timeout auto-ripristino (minuti)</td></tr>
+    <tr><td><code>tempradio &lt;f&gt; &lt;bw&gt; &lt;sf&gt; &lt;cr&gt;</code></td><td>Parametri radio temporanei (separati da spazio)</td></tr>
+    <tr><td><code>tempradio off</code></td><td>Ripristina parametri radio default</td></tr>
+  </tbody>
+</table>
+
+<div class="box box-tip">
+  <div class="box-title">Esempio</div>
+  <code>set radio 869.618,62.5,8,8</code> &mdash; configurazione standard EU868<br>
+  <code>tempradio 869.618 62.5 8 8 30</code> &mdash; test per 30 minuti, poi ripristino automatico
+</div>
+
+<h3>Potenza di Trasmissione (TX)</h3>
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>set tx</code></td><td>Mostra potenza TX corrente e stato auto</td></tr>
+    <tr><td><code>set tx &lt;dBm&gt;</code></td><td>Imposta potenza TX manuale (disabilita auto)</td></tr>
+    <tr><td><code>set tx auto on</code></td><td>Abilita potenza TX adattiva</td></tr>
+    <tr><td><code>set tx auto off</code></td><td>Disabilita auto, ripristina potenza massima</td></tr>
+  </tbody>
+</table>
+
+<!-- =================== 6. ADVERT =================== -->
+<h2 class="break-before">6. ADVERT e Rete Mesh</h2>
+
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>advert</code></td><td>Invia pacchetto ADVERT immediatamente (flood)</td></tr>
+    <tr><td><code>advert local</code></td><td>Invia ADVERT locale (diretto, solo 0 hop)</td></tr>
+    <tr><td><code>set advert.interval &lt;min&gt;</code></td><td>Intervallo ADVERT in minuti (1-1440)</td></tr>
+    <tr><td><code>ping</code></td><td>Invia pacchetto test broadcast (FLOOD)</td></tr>
+    <tr><td><code>ping &lt;hash&gt;</code></td><td>Ping diretto a un nodo per hash esadecimale</td></tr>
+    <tr><td><code>trace &lt;hash&gt;</code></td><td>Traccia percorso verso un nodo (mostra path e hop)</td></tr>
+  </tbody>
+</table>
+
+<!-- =================== 7. PASSWORD =================== -->
+<h2>7. Password e Sicurezza</h2>
+
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>password</code></td><td>Mostra password admin e guest</td></tr>
+    <tr><td><code>password &lt;pwd&gt;</code></td><td>Imposta password admin</td></tr>
+    <tr><td><code>set guest.password &lt;pwd&gt;</code></td><td>Imposta password guest</td></tr>
+    <tr><td><code>get guest.password</code></td><td>Mostra password guest</td></tr>
+    <tr><td><code>setperm &lt;pubkey&gt; &lt;perm&gt;</code></td><td>Imposta permesso ACL per nodo (0-255, solo seriale)</td></tr>
+  </tbody>
+</table>
+
+<div class="box box-danger">
+  <div class="box-title">Sicurezza</div>
+  Impostare <strong>sempre</strong> le password prima del deploy. Le sessioni remote scadono dopo 1 ora di inattivit&agrave;. Il rate limiter protegge da attacchi brute-force (5 tentativi login/min).
+</div>
+
+<!-- =================== 8. MAILBOX =================== -->
+<h2>8. Mailbox Store-and-Forward</h2>
+
+<p>Il repeater memorizza i messaggi per i nodi offline e li riconsegna quando il nodo torna online (invia un ADVERT).</p>
+
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>mailbox</code></td><td>Stato: slot usati/totali, conteggio EEPROM (E) e RAM (R)</td></tr>
+    <tr><td><code>mailbox clear</code></td><td>Svuota tutti gli slot (solo admin)</td></tr>
+  </tbody>
+</table>
+
+<div class="box box-tip">
+  <div class="box-title">Capacit&agrave;</div>
+  2 slot persistenti EEPROM + 4 slot volatili RAM = <strong>6 messaggi max</strong>, TTL 24 ore. Nessuna configurazione necessaria.
+</div>
+
+<!-- =================== 9. HEALTH =================== -->
+<h2>9. Health Monitor e Alert</h2>
+
+<p>Monitoraggio automatico della salute della rete mesh. Rileva nodi offline (&gt;30 min) e invia alert.</p>
+
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>health</code></td><td>Dashboard: uptime, batteria, nodi online/offline, nodi problematici</td></tr>
+    <tr><td><code>alert</code></td><td>Stato alert (on/off, destinazione)</td></tr>
+    <tr><td><code>alert on|off</code></td><td>Abilita/disabilita alert automatici</td></tr>
+    <tr><td><code>alert dest &lt;nome&gt;</code></td><td>Imposta destinazione alert (per nome contatto)</td></tr>
+    <tr><td><code>alert clear</code></td><td>Cancella configurazione alert</td></tr>
+    <tr><td><code>alert test</code></td><td>Invia alert di test (solo seriale)</td></tr>
+  </tbody>
+</table>
+
+<!-- =================== 10. REPORT =================== -->
+<h2 class="break-before">10. Report Giornaliero</h2>
+
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>report</code></td><td>Stato report (on/off, orario, destinazione)</td></tr>
+    <tr><td><code>report on</code></td><td>Abilita report giornaliero</td></tr>
+    <tr><td><code>report off</code></td><td>Disabilita report giornaliero</td></tr>
+    <tr><td><code>report test</code></td><td>Invia report di test immediatamente</td></tr>
+    <tr><td><code>report nodes</code></td><td>Invia report nodi immediatamente</td></tr>
+    <tr><td><code>report time HH:MM</code></td><td>Imposta orario invio (formato 24h)</td></tr>
+    <tr><td><code>report dest &lt;nome&gt;</code></td><td>Imposta destinazione (per nome contatto)</td></tr>
+    <tr><td><code>report clear</code></td><td>Cancella destinazione e disabilita</td></tr>
+  </tbody>
+</table>
+
+<!-- =================== 11. QUIET/CB =================== -->
+<h2>11. Quiet Hours e Circuit Breaker</h2>
+
+<h3>Quiet Hours</h3>
+<p>Riduce la frequenza di inoltro durante le ore configurate. Richiede TimeSync.</p>
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>quiet</code></td><td>Mostra stato quiet hours</td></tr>
+    <tr><td><code>quiet &lt;inizio&gt; &lt;fine&gt;</code></td><td>Imposta quiet hours (0-23, es. <code>quiet 22 6</code>)</td></tr>
+    <tr><td><code>quiet off</code></td><td>Disabilita quiet hours</td></tr>
+  </tbody>
+</table>
+
+<h3>Circuit Breaker</h3>
+<p>Blocca l'inoltro DIRECT verso vicini con link degradato (SNR &lt; -10 dB). Dopo 5 minuti passa a half-open. Un buon SNR chiude il breaker. Il FLOOD non viene mai bloccato.</p>
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>cb</code></td><td>Mostra conteggio circuit breaker aperti</td></tr>
+  </tbody>
+</table>
+
+<!-- =================== 12. RATE LIMIT =================== -->
+<h2>12. Rate Limiting</h2>
+
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>ratelimit</code></td><td>Mostra stato e contatori bloccati</td></tr>
+    <tr><td><code>ratelimit on|off</code></td><td>Abilita/disabilita rate limiting</td></tr>
+    <tr><td><code>ratelimit reset</code></td><td>Azzera contatori</td></tr>
+  </tbody>
+</table>
+
+<p class="small">Limiti default: Login 5/min, Request 30/min, Forward 100/min.</p>
+
+<!-- =================== 13. STATS =================== -->
+<h2>13. Statistiche e Manutenzione</h2>
+
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>clear stats</code></td><td>Azzera contatori di sessione (RX/TX/FWD/ERR/ADV)</td></tr>
+    <tr><td><code>savestats</code></td><td>Forza salvataggio statistiche in EEPROM (solo seriale)</td></tr>
+  </tbody>
+</table>
+
+<!-- =================== 14. SISTEMA =================== -->
+<h2>14. Comandi di Sistema</h2>
+
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>save</code></td><td>Salva configurazione in EEPROM</td></tr>
+    <tr><td><code>erase</code> / <code>reset</code></td><td>Ripristina impostazioni di fabbrica</td></tr>
+    <tr><td><code>reboot</code></td><td>Riavvia il dispositivo</td></tr>
+    <tr><td><code>clkreboot</code></td><td>Reset sincronizzazione orologio e riavvio</td></tr>
+    <tr><td><code>newid</code></td><td>Genera nuova identit&agrave; Ed25519 (solo seriale)</td></tr>
+    <tr><td><code>get prv.key</code></td><td>Esporta seed chiave privata Ed25519 (64 char hex, solo seriale)</td></tr>
+    <tr><td><code>set prv.key &lt;hex&gt;</code></td><td>Importa seed Ed25519 e rigenera identit&agrave; (solo seriale)</td></tr>
+  </tbody>
+</table>
+
+<div class="box box-warning">
+  <div class="box-title">Backup Identit&agrave;</div>
+  Prima di aggiornare il firmware, eseguire <code>get prv.key</code> per salvare il seed della chiave. Dopo il flash, ripristinare con <code>set prv.key &lt;hex&gt;</code>.
+</div>
+
+<!-- =================== 15. SOLO SERIALE =================== -->
+<h2 class="break-before">15. Comandi Solo Seriale</h2>
+
+<p>Questi comandi sono disponibili <strong>solo</strong> via console USB, non da remoto:</p>
+
+<table>
+  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td><code>contacts</code></td><td>Lista contatti noti</td></tr>
+    <tr><td><code>contact &lt;hash&gt;</code></td><td>Dettagli contatto e chiave pubblica</td></tr>
+    <tr><td><code>nodetype chat|repeater</code></td><td>Imposta tipo nodo</td></tr>
+    <tr><td><code>time &lt;timestamp&gt;</code></td><td>Imposta ora Unix manualmente</td></tr>
+    <tr><td><code>newid</code></td><td>Genera nuova identit&agrave;</td></tr>
+    <tr><td><code>get prv.key</code></td><td>Esporta seed privato</td></tr>
+    <tr><td><code>set prv.key &lt;hex&gt;</code></td><td>Importa seed privato</td></tr>
+    <tr><td><code>get public.key</code></td><td>Mostra chiave pubblica hex</td></tr>
+    <tr><td><code>setperm &lt;pubkey&gt; &lt;perm&gt;</code></td><td>Imposta permesso ACL per nodo</td></tr>
+    <tr><td><code>savestats</code></td><td>Forza salvataggio statistiche</td></tr>
+    <tr><td><code>tempradio ...</code></td><td>Parametri radio temporanei</td></tr>
+    <tr><td><code>set radio ...</code></td><td>Imposta parametri radio</td></tr>
+    <tr><td><code>set freq &lt;MHz&gt;</code></td><td>Imposta solo frequenza</td></tr>
+    <tr><td><code>log start|stop|erase</code></td><td>Controllo packet log</td></tr>
+    <tr><td><code>alert test</code></td><td>Invia alert di test</td></tr>
+    <tr><td><code>msg &lt;nome&gt; &lt;messaggio&gt;</code></td><td>Invia messaggio diretto a un contatto</td></tr>
+  </tbody>
+</table>
+
+<!-- =================== 16. REMOTO =================== -->
+<h2>16. Accesso Remoto (MeshCore App)</h2>
+
+<p>Tutti i comandi condivisi sono accessibili da remoto tramite il canale CLI crittografato della MeshCore app.</p>
+
+<h3>Comandi Guest (sola lettura)</h3>
+<div class="cmd-list" style="font-size:7.5pt; line-height:1.8;">
+status &nbsp; stats &nbsp; stats-core &nbsp; stats-radio &nbsp; stats-packets &nbsp; ver &nbsp; board<br>
+clock &nbsp; time &nbsp; lifetime &nbsp; radiostats &nbsp; packetstats &nbsp; telemetry &nbsp; identity<br>
+location &nbsp; nodes &nbsp; neighbours &nbsp; health &nbsp; mailbox &nbsp; power &nbsp; powersaving<br>
+radio &nbsp; rssi &nbsp; acl &nbsp; quiet &nbsp; cb &nbsp; log &nbsp; help<br>
+get name &nbsp; get lat &nbsp; get lon &nbsp; get tx &nbsp; get radio &nbsp; get freq<br>
+get repeat &nbsp; get flood.max &nbsp; get advert.interval &nbsp; get guest.password<br>
+get owner.info &nbsp; get af &nbsp; get adc.multiplier &nbsp; get txdelay<br>
+get rxdelay &nbsp; get direct.txdelay &nbsp; get agc.reset.interval<br>
+get flood.advert.interval
+</div>
+
+<h3 style="margin-top:14px;">Comandi Admin (lettura/scrittura)</h3>
+<div class="cmd-list" style="font-size:7.5pt; line-height:1.8;">
+set name &lt;X&gt; &nbsp; set lat &lt;X&gt; &nbsp; set lon &lt;X&gt; &nbsp; set repeat on/off<br>
+set flood.max &lt;N&gt; &nbsp; set advert.interval &lt;min&gt; &nbsp; set tx &lt;dBm&gt;<br>
+set tx auto on/off &nbsp; set owner.info &lt;text&gt; &nbsp; set af &lt;N&gt;<br>
+set adc.multiplier &lt;N&gt; &nbsp; set txdelay/rxdelay/direct.txdelay &lt;N&gt;<br>
+set agc.reset.interval &lt;sec&gt; &nbsp; set flood.advert.interval &lt;hours&gt;<br>
+password &lt;pwd&gt; &nbsp; set guest.password &lt;pwd&gt; &nbsp; powersaving on/off<br>
+mode 0/1/2 &nbsp; sleep on/off &nbsp; rxboost on/off &nbsp; advert &nbsp; ping &nbsp; trace<br>
+alert on/off/dest/clear &nbsp; mailbox clear &nbsp; quiet &lt;S&gt; &lt;E&gt; &nbsp; quiet off<br>
+ratelimit on/off/reset &nbsp; clear stats &nbsp; neighbor.remove &lt;hex&gt;<br>
+report on/off/dest/time/test/nodes &nbsp; save &nbsp; erase &nbsp; reboot &nbsp; clkreboot
+</div>
+
+<!-- =================== 17. PROFILI =================== -->
+<h2 class="break-before">17. Profili di Configurazione</h2>
+
+<p>Di seguito tre profili preconfigurati per scenari d'uso comuni.</p>
+
+<!-- MASSIMA POTENZA -->
+<div class="profile-card">
+  <span class="badge badge-perf">MASSIMA PORTATA</span>
+  <h4>Profilo: Massima Potenza e Copertura</h4>
+  <p>Per installazioni fisse con alimentazione continua (solare, rete). Priorit&agrave; alla copertura massima e alla reattivit&agrave; della rete.</p>
+
+  <div class="two-col">
+    <div>
+      <h4>Comandi di configurazione</h4>
+      <div class="cmd-list">
+mode 0<br>
+sleep off<br>
+rxboost on<br>
+set tx 14<br>
+set tx auto off<br>
+set repeat on<br>
+set flood.max 15<br>
+set advert.interval 5<br>
+set af 0<br>
+set txdelay 50<br>
+set rxdelay 50<br>
+ratelimit on<br>
+alert on<br>
+save
+      </div>
+    </div>
+    <div>
+      <h4>Spiegazione parametri</h4>
+      <table style="font-size:8pt;">
+        <tbody>
+          <tr><td><code>mode 0</code></td><td>Performance: nessun risparmio energetico</td></tr>
+          <tr><td><code>sleep off</code></td><td>Deep sleep disabilitato: sempre in ascolto</td></tr>
+          <tr><td><code>rxboost on</code></td><td>Guadagno RX potenziato: migliore sensibilit&agrave;</td></tr>
+          <tr><td><code>set tx 14</code></td><td>Potenza TX massima (14 dBm)</td></tr>
+          <tr><td><code>set tx auto off</code></td><td>Potenza fissa, no riduzione adattiva</td></tr>
+          <tr><td><code>set flood.max 15</code></td><td>Massimo hop per pacchetti flood</td></tr>
+          <tr><td><code>set advert.interval 5</code></td><td>ADVERT ogni 5 minuti (scoperta rapida)</td></tr>
+          <tr><td><code>set af 0</code></td><td>Duty cycle disabilitato (TX senza limiti)</td></tr>
+          <tr><td><code>txdelay 50</code></td><td>Ritardo ridotto: risposte pi&ugrave; rapide</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- MINIMO CONSUMO -->
+<div class="profile-card">
+  <span class="badge badge-save">RISPARMIO ENERGETICO</span>
+  <h4>Profilo: Minimo Consumo Batteria</h4>
+  <p>Per nodi alimentati a batteria in aree remote. Massimizza la durata con funzionalit&agrave; essenziali.</p>
+
+  <div class="two-col">
+    <div>
+      <h4>Comandi di configurazione</h4>
+      <div class="cmd-list">
+mode 2<br>
+sleep on<br>
+rxboost off<br>
+set tx auto on<br>
+set repeat on<br>
+set flood.max 3<br>
+set advert.interval 30<br>
+set af 20<br>
+set txdelay 200<br>
+set rxdelay 200<br>
+set flood.advert.interval 12<br>
+quiet 22 6<br>
+alert off<br>
+save
+      </div>
+    </div>
+    <div>
+      <h4>Spiegazione parametri</h4>
+      <table style="font-size:8pt;">
+        <tbody>
+          <tr><td><code>mode 2</code></td><td>Power Save: massimo risparmio</td></tr>
+          <tr><td><code>sleep on</code></td><td>Deep sleep attivo: ~3.5 &micro;A tra le finestre RX</td></tr>
+          <tr><td><code>rxboost off</code></td><td>Guadagno RX standard: minor consumo</td></tr>
+          <tr><td><code>set tx auto on</code></td><td>TX adattivo: riduce la potenza se non necessaria</td></tr>
+          <tr><td><code>set flood.max 3</code></td><td>Pochi hop: riduce traffico di rete</td></tr>
+          <tr><td><code>set advert.interval 30</code></td><td>ADVERT ogni 30 min: meno TX</td></tr>
+          <tr><td><code>set af 20</code></td><td>Duty cycle 2x: pi&ugrave; attesa tra le trasmissioni</td></tr>
+          <tr><td><code>txdelay 200</code></td><td>Ritardo maggiore: meno collisioni, pi&ugrave; sleep</td></tr>
+          <tr><td><code>quiet 22 6</code></td><td>Inoltro ridotto dalle 22 alle 6</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- BILANCIATO -->
+<div class="profile-card">
+  <span class="badge badge-bal">BILANCIATO</span>
+  <h4>Profilo: Uso Bilanciato</h4>
+  <p>Compromesso tra copertura e durata. Ideale per la maggior parte delle installazioni.</p>
+
+  <div class="two-col">
+    <div>
+      <h4>Comandi di configurazione</h4>
+      <div class="cmd-list">
+mode 1<br>
+sleep on<br>
+rxboost on<br>
+set tx auto on<br>
+set repeat on<br>
+set flood.max 7<br>
+set advert.interval 10<br>
+set af 10<br>
+set txdelay 100<br>
+set rxdelay 100<br>
+ratelimit on<br>
+alert on<br>
+save
+      </div>
+    </div>
+    <div>
+      <h4>Spiegazione parametri</h4>
+      <table style="font-size:8pt;">
+        <tbody>
+          <tr><td><code>mode 1</code></td><td>Balanced: buon compromesso prestazioni/consumo</td></tr>
+          <tr><td><code>sleep on</code></td><td>Deep sleep attivo per risparmiare tra le finestre RX</td></tr>
+          <tr><td><code>rxboost on</code></td><td>Guadagno RX potenziato per migliore ricezione</td></tr>
+          <tr><td><code>set tx auto on</code></td><td>TX adattivo: potenza variabile in base al link</td></tr>
+          <tr><td><code>set flood.max 7</code></td><td>Buon raggio multi-hop senza eccesso di traffico</td></tr>
+          <tr><td><code>set advert.interval 10</code></td><td>ADVERT ogni 10 min: buon compromesso</td></tr>
+          <tr><td><code>set af 10</code></td><td>Duty cycle 1.0x: standard</td></tr>
+          <tr><td><code>txdelay 100</code></td><td>Ritardo standard (default)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- =================== 18. QUICK REF =================== -->
+<h2 class="break-before">18. Quick Reference</h2>
+
+<h3>Impostazioni per Massima Portata vs Minimo Consumo</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Parametro</th>
+      <th>Massima Portata</th>
+      <th>Minimo Consumo</th>
+      <th>Default</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>mode</strong></td><td><code>0</code> (performance)</td><td><code>2</code> (powersave)</td><td><code>0</code></td></tr>
+    <tr><td><strong>sleep</strong></td><td><code>off</code></td><td><code>on</code></td><td><code>off</code></td></tr>
+    <tr><td><strong>rxboost</strong></td><td><code>on</code></td><td><code>off</code></td><td><code>off</code></td></tr>
+    <tr><td><strong>TX power</strong></td><td><code>14</code> dBm (fisso)</td><td><code>auto on</code></td><td><code>14</code></td></tr>
+    <tr><td><strong>flood.max</strong></td><td><code>15</code></td><td><code>3</code></td><td><code>7</code></td></tr>
+    <tr><td><strong>advert.interval</strong></td><td><code>5</code> min</td><td><code>30</code> min</td><td><code>10</code> min</td></tr>
+    <tr><td><strong>af (airtime)</strong></td><td><code>0</code> (off)</td><td><code>20</code> (2.0x)</td><td><code>10</code></td></tr>
+    <tr><td><strong>txdelay</strong></td><td><code>50</code></td><td><code>200</code></td><td><code>100</code></td></tr>
+    <tr><td><strong>rxdelay</strong></td><td><code>50</code></td><td><code>200</code></td><td><code>100</code></td></tr>
+    <tr><td><strong>quiet hours</strong></td><td>off</td><td><code>22-6</code></td><td>off</td></tr>
+    <tr><td><strong>flood.advert.interval</strong></td><td><code>0</code> (auto)</td><td><code>12</code> ore</td><td><code>0</code></td></tr>
+  </tbody>
+</table>
+
+<h3 style="margin-top:20px;">Checklist Deploy</h3>
+
+<table>
+  <thead><tr><th>#</th><th>Azione</th><th>Comando</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Impostare nome nodo</td><td><code>set name MioNodo</code></td></tr>
+    <tr><td>2</td><td>Impostare coordinate GPS</td><td><code>set lat 45.46</code> + <code>set lon 9.19</code></td></tr>
+    <tr><td>3</td><td>Impostare password admin</td><td><code>password MiaPassword</code></td></tr>
+    <tr><td>4</td><td>Impostare password guest</td><td><code>set guest.password GuestPwd</code></td></tr>
+    <tr><td>5</td><td>Scegliere profilo energetico</td><td><code>mode 0</code> / <code>mode 1</code> / <code>mode 2</code></td></tr>
+    <tr><td>6</td><td>Abilitare alert (opzionale)</td><td><code>alert on</code> + <code>alert dest NomeAdmin</code></td></tr>
+    <tr><td>7</td><td>Backup chiave privata</td><td><code>get prv.key</code> (annotare!)</td></tr>
+    <tr><td>8</td><td>Salvare tutto</td><td><code>save</code></td></tr>
+    <tr><td>9</td><td>Verificare configurazione</td><td><code>status</code> + <code>identity</code> + <code>power</code></td></tr>
+  </tbody>
+</table>
+
+<div class="box box-success" style="margin-top:16px;">
+  <div class="box-title">Suggerimento Finale</div>
+  Usare <code>health</code> periodicamente per monitorare lo stato della rete.
+  Usare <code>tempradio</code> per testare nuove configurazioni radio senza rischi &mdash; i parametri tornano ai default automaticamente.
+</div>
+
+<p style="text-align:center; margin-top:30px; color:#94a3b8; font-size:8pt;">
+  CubeCellMeshCore v0.5.2 &bull; Heltec HTCC-AB01 &bull; Firmware MeshCore-compatible<br>
+  Documento generato a Febbraio 2026
+</p>
+
+</body>
+</html>
