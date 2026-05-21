@@ -376,6 +376,16 @@ bool isActivelyReceiving();
 void feedWatchdog();
 void handleRadioError();
 
+// Command hash function for dispatcher optimization
+// Maps command strings to unique 32-bit hashes (no collisions for 108 commands)
+static constexpr inline uint32_t hash_command(const char* s) {
+    uint32_t h = 0;
+    while (*s) {
+        h = ((h << 5) + h) ^ (uint8_t)(*s++);
+    }
+    return h;
+}
+
 // Radio parameter helpers (for tempradio support) - inline for optimization
 // Declared extern in main.cpp, but inlined here for zero-cost abstraction
 extern bool tempRadioActive;
