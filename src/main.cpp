@@ -110,7 +110,7 @@ static void cmdPrint(CmdCtx* ctx, const char* fmt, ...) {
         if (rc > 0 && ctx->len + rc < ctx->maxLen) ctx->len += rc;
     } else {
         #ifndef SILENT
-        char tmp[96];
+        static char tmp[96];
         vsnprintf(tmp, sizeof(tmp), fmt, ap);
         Serial.print(tmp);
         #endif
@@ -833,7 +833,7 @@ uint8_t cmdPos = 0;
 
 // Unified radio param parser for tempradio and set radio
 static void parseAndApplyRadio(const char* args, char sep) {
-    char buf[48];
+    static char buf[48];
     strncpy(buf, args, sizeof(buf) - 1); buf[sizeof(buf)-1] = 0;
     if (sep == ',') { for (char* q = buf; *q; q++) if (*q == ',') *q = ' '; }
     char* p = buf;
@@ -1426,18 +1426,7 @@ void handleRadioError() {
 //=============================================================================
 
 // Get current radio parameters (temporary if active, otherwise default)
-float getCurrentFrequency() {
-    return tempRadioActive ? tempFrequency : MC_FREQUENCY;
-}
-float getCurrentBandwidth() {
-    return tempRadioActive ? tempBandwidth : MC_BANDWIDTH;
-}
-uint8_t getCurrentSpreadingFactor() {
-    return tempRadioActive ? tempSpreadingFactor : MC_SPREADING;
-}
-uint8_t getCurrentCodingRate() {
-    return tempRadioActive ? tempCodingRate : MC_CODING_RATE;
-}
+// Radio parameter helpers are now defined as inline in main.h
 
 void setupRadio() {
     // Use temporary parameters if active, otherwise defaults

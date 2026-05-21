@@ -376,11 +376,24 @@ bool isActivelyReceiving();
 void feedWatchdog();
 void handleRadioError();
 
-// Radio parameter helpers (for tempradio support)
-float getCurrentFrequency();
-float getCurrentBandwidth();
-uint8_t getCurrentSpreadingFactor();
-uint8_t getCurrentCodingRate();
+// Radio parameter helpers (for tempradio support) - inline for optimization
+// Declared extern in main.cpp, but inlined here for zero-cost abstraction
+extern bool tempRadioActive;
+extern float tempFrequency, tempBandwidth;
+extern uint8_t tempSpreadingFactor, tempCodingRate;
+
+static inline float getCurrentFrequency() {
+    return tempRadioActive ? tempFrequency : MC_FREQUENCY;
+}
+static inline float getCurrentBandwidth() {
+    return tempRadioActive ? tempBandwidth : MC_BANDWIDTH;
+}
+static inline uint8_t getCurrentSpreadingFactor() {
+    return tempRadioActive ? tempSpreadingFactor : MC_SPREADING;
+}
+static inline uint8_t getCurrentCodingRate() {
+    return tempRadioActive ? tempCodingRate : MC_CODING_RATE;
+}
 
 // Power management
 void enterDeepSleep();

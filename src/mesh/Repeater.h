@@ -169,16 +169,16 @@ public:
  */
 struct NeighbourInfo {
     uint8_t pubKeyPrefix[6];    // First 6 bytes of public key
-    uint32_t lastHeard;         // millis() when last heard
     int8_t snr;                 // SNR * 4
+    int8_t snrAvg;              // SNR EMA * 4
+    uint8_t cbState;            // Circuit breaker: 0=closed, 1=open, 2=half-open
+    bool valid;                 // Entry is valid
     int16_t rssi;               // RSSI in dBm
     int16_t rssiAvg;            // RSSI EMA (exponential moving average)
-    int8_t snrAvg;              // SNR EMA * 4
     uint16_t pktCount;          // Total packets heard from this neighbour
     uint16_t pktCountWindow;    // Packets heard in current window (for loss calc)
+    uint32_t lastHeard;         // millis() when last heard
     uint32_t windowStartTime;   // Start of current measurement window
-    bool valid;                 // Entry is valid
-    uint8_t cbState;            // Circuit breaker: 0=closed, 1=open, 2=half-open
 
     void clear() {
         memset(pubKeyPrefix, 0, 6);
@@ -201,8 +201,8 @@ struct NeighbourInfo {
 struct ACLEntry {
     uint8_t pubKeyPrefix[6];    // First 6 bytes of public key
     uint8_t permissions;        // Permission level
-    uint32_t lastTimestamp;     // Last request timestamp (replay protection)
     bool valid;                 // Entry is valid
+    uint32_t lastTimestamp;     // Last request timestamp (replay protection)
 
     void clear() {
         memset(pubKeyPrefix, 0, 6);
