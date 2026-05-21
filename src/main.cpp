@@ -487,15 +487,8 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
             CP("E:0-64\n");
         }
     }
-    else if (strncmp(cmd, "set name ", 9) == 0) {
-        const char* n = cmd + 9;
-        if (strlen(n) > 0 && strlen(n) < 16) {
-            nodeIdentity.setNodeName(n); nodeIdentity.save();
-            CP("name=%s\n", n);
-        } else CP("E:1-15\n");
-    }
-    else if (strncmp(cmd, "name ", 5) == 0) {
-        const char* n = cmd + 5;
+    else if (strncmp(cmd, "set name ", 9) == 0 || strncmp(cmd, "name ", 5) == 0) {
+        const char* n = strncmp(cmd, "set name ", 9) == 0 ? cmd + 9 : cmd + 5;
         if (strlen(n) > 0 && strlen(n) < 16) {
             nodeIdentity.setNodeName(n); nodeIdentity.save();
             CP("name=%s\n", n);
@@ -1176,15 +1169,8 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
             RESP_APPEND("pwd set\n");
         } else RESP_APPEND("E:1-15\n");
     }
-    else if (strncmp(cmd, "set guest.password ", 19) == 0) {
-        const char* pwd = cmd + 19;
-        if (strlen(pwd) <= 15) {
-            sessionManager.setGuestPassword(pwd); saveConfig();
-            RESP_APPEND("guest set\n");
-        } else RESP_APPEND("E:0-15\n");
-    }
-    else if (strncmp(cmd, "set guest ", 10) == 0) {
-        const char* pwd = cmd + 10;
+    else if (strncmp(cmd, "set guest.password ", 19) == 0 || strncmp(cmd, "set guest ", 10) == 0) {
+        const char* pwd = strncmp(cmd, "set guest.password ", 19) == 0 ? cmd + 19 : cmd + 10;
         if (strlen(pwd) <= 15) {
             sessionManager.setGuestPassword(pwd); saveConfig();
             RESP_APPEND("guest set\n");
