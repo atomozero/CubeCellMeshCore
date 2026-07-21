@@ -2153,8 +2153,7 @@ bool shouldForward(MCPacket* pkt) {
     uint8_t payloadType = pkt->header.getPayloadType();
     if (payloadType == MC_PAYLOAD_ANON_REQ ||
         payloadType == MC_PAYLOAD_REQUEST ||
-        payloadType == MC_PAYLOAD_RESPONSE ||
-        payloadType == MC_PAYLOAD_PLAIN) {
+        payloadType == MC_PAYLOAD_RESPONSE) {
         if (pkt->payloadLen > 0 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
             return false;
         }
@@ -2871,7 +2870,6 @@ void processReceivedPacket(MCPacket* pkt) {
 
     // Handle ANON_REQ (login request)
     if (pkt->header.getPayloadType() == MC_PAYLOAD_ANON_REQ) {
-        //LOG(TAG_RX "ANON_REQ\n\r");
         if (pkt->payloadLen >= 51 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
             // Rate limit login attempts
             if (!repeaterHelper.allowLogin()) {
@@ -2884,7 +2882,6 @@ void processReceivedPacket(MCPacket* pkt) {
     }
     // Handle REQUEST (authenticated request)
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_REQUEST) {
-        //LOG(TAG_RX "REQUEST\n\r");
         if (pkt->payloadLen >= 20 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
             // Rate limit requests
             if (!repeaterHelper.allowRequest()) {
@@ -2897,7 +2894,6 @@ void processReceivedPacket(MCPacket* pkt) {
     }
     // Handle MC_PAYLOAD_PLAIN: directed ping/pong or TXT_MSG CLI
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_PLAIN) {
-        //LOG(TAG_RX "PLAIN\n\r");
         if (pkt->payloadLen >= 4 && pkt->payload[2] == 'D' && pkt->payload[3] == 'P'
             && pkt->payload[0] == nodeIdentity.getNodeHash()) {
             // Directed PING for us - respond with PONG
@@ -2942,14 +2938,12 @@ void processReceivedPacket(MCPacket* pkt) {
     }
     // Handle CONTROL (node discovery, etc.)
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_CONTROL) {
-        //LOG(TAG_RX "CONTROL\n\r");
         if (pkt->payloadLen >= 6) {
             processDiscoverRequest(pkt);
         }
     }
     // Handle TRACE (ping) - add our SNR and forward
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_PATH_TRACE) {
-        //LOG(TAG_RX "TRACE\n\r");
         // Add our SNR to the path (SNR * 4 as signed byte)
         if (pkt->pathLen < MC_MAX_PATH_SIZE) {
             //crossreferenced with https://github.com/meshcore-dev/MeshCore/blob/a3a1aa5e3be34b42d8ac8c2cc244d30af6cdd71e/src/Mesh.cpp#L42
@@ -2968,7 +2962,6 @@ void processReceivedPacket(MCPacket* pkt) {
     }
     // Parse and display ADVERT info
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_ADVERT) {
-        //LOG(TAG_RX "ADVERT\n\r");
         advRxCount++;
         // Try to sync time from ADVERT timestamp
         // First ADVERT: sync immediately. Already synced: need 2 matching different times to re-sync
@@ -3066,7 +3059,6 @@ void processReceivedPacket(MCPacket* pkt) {
     }
     // Track nodes - either from path or from payload hash for direct packets
     else if (pkt->pathLen > 0) {
-        //LOG(TAG_RX "OTHER>0\n\r");
         // First byte is originator
         bool isNew = seenNodes.update(pkt->path[0], pkt->rssi, pkt->snr);
         if (isNew) {
@@ -3081,7 +3073,6 @@ void processReceivedPacket(MCPacket* pkt) {
             }
         }
     } else if (pkt->payloadLen >= 6) {
-        //LOG(TAG_RX "OTHER>6\n\r");
         // Path=0: Direct packet from nearby node
         // Generate hash from first 6 bytes of payload (usually contains sender ID)
         uint8_t hash = pkt->payload[0];
