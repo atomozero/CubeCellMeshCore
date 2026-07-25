@@ -2950,7 +2950,7 @@ void processReceivedPacket(MCPacket* pkt) {
             uint8_t flags = pkt->payload[8];
             uint8_t path_hash_size = flags & 0x03;  // NEW v1.11+: lower 2 bits is path hash size
             uint16_t offset = (uint16_t)pkt->pathLen << path_hash_size;
-            bool forward_trace = memcmp(&pkt->payload[9 + offset], nodeIdentity.getPublicKey(), 1 << path_hash_size) == 0;
+            bool forward_trace = nodeIdentity.compareNodeHash(&pkt->payload[9 + offset], 1 << path_hash_size);
             LOG(TAG_PING " f%d hsz%d o%d id%02x\n\r",forward_trace,path_hash_size,offset,pkt->payload[9 + offset]);
             if (forward_trace) { //only forward traces we're part of
                 LOG(TAG_PING " fwd\r\n");

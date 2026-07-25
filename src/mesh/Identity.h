@@ -213,6 +213,13 @@ public:
     }
 
     /**
+     * 
+     */
+    bool compareNodeHash(const uint8_t* hash, const uint8_t length) const {
+        return memcmp(hash, identity.publicKey, length) == 0;
+    }
+
+    /**
      * Get pointer to public key
      */
     const uint8_t* getPublicKey() const {
