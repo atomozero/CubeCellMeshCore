@@ -2894,7 +2894,7 @@ void processReceivedPacket(MCPacket* pkt) {
     }
     // Handle MC_PAYLOAD_PLAIN: directed ping/pong or TXT_MSG CLI
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_PLAIN) {
-        if (pkt->payloadLen >= 4 && pkt->payload[2] == 'D' && pkt->payload[3] == 'P'
+        /*if (pkt->payloadLen >= 4 && pkt->payload[2] == 'D' && pkt->payload[3] == 'P'
             && pkt->payload[0] == nodeIdentity.getNodeHash()) {
             // Directed PING for us - respond with PONG
             LOG(TAG_PING " from %02X %s\n\r", pkt->payload[1],
@@ -2926,7 +2926,7 @@ void processReceivedPacket(MCPacket* pkt) {
                 pkt->rssi, pkt->snr / 4, abs(pkt->snr % 4) * 25,
                 pkt->pathLen);
         }
-        else if (pkt->payloadLen >= 10 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
+        else*/ if (pkt->payloadLen >= 10 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
             // TXT_MSG CLI
             if (!repeaterHelper.allowRequest()) {
                 statsRecordRateLimited();
@@ -2946,9 +2946,18 @@ void processReceivedPacket(MCPacket* pkt) {
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_PATH_TRACE) {
         // Add our SNR to the path (SNR * 4 as signed byte)
         if (pkt->pathLen < MC_MAX_PATH_SIZE) {
-            pkt->path[pkt->pathLen++] = (int8_t)(pkt->snr);
-            // Forward the trace packet
-            txQueue.add(pkt);
+            //crossreferenced with https://github.com/meshcore-dev/MeshCore/blob/a3a1aa5e3be34b42d8ac8c2cc244d30af6cdd71e/src/Mesh.cpp#L42
+            uint8_t flags = pkt->payload[8];
+            uint8_t path_hash_size = flags & 0x03;  // NEW v1.11+: lower 2 bits is path hash size
+            uint16_t offset = (uint16_t)pkt->pathLen << path_hash_size;
+            bool forward_trace = nodeIdentity.compareNodeHash(&pkt->payload[9 + offset], 1 << path_hash_size);
+            LOG(TAG_PING " f%d hsz%d o%d id%02x\n\r",forward_trace,path_hash_size,offset,pkt->payload[9 + offset]);
+            if (forward_trace) { //only forward traces we're part of
+                LOG(TAG_PING " fwd\r\n");
+                pkt->path[pkt->pathLen++] = (int8_t)(pkt->snr);
+                // Forward the trace packet
+                txQueue.add(pkt);
+            }
         }
     }
     // Parse and display ADVERT info
