@@ -2894,7 +2894,7 @@ void processReceivedPacket(MCPacket* pkt) {
     }
     // Handle MC_PAYLOAD_PLAIN: directed ping/pong or TXT_MSG CLI
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_PLAIN) {
-        if (pkt->payloadLen >= 4 && pkt->payload[2] == 'D' && pkt->payload[3] == 'P'
+        /*if (pkt->payloadLen >= 4 && pkt->payload[2] == 'D' && pkt->payload[3] == 'P'
             && pkt->payload[0] == nodeIdentity.getNodeHash()) {
             // Directed PING for us - respond with PONG
             LOG(TAG_PING " from %02X %s\n\r", pkt->payload[1],
@@ -2926,7 +2926,7 @@ void processReceivedPacket(MCPacket* pkt) {
                 pkt->rssi, pkt->snr / 4, abs(pkt->snr % 4) * 25,
                 pkt->pathLen);
         }
-        else if (pkt->payloadLen >= 10 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
+        else*/ if (pkt->payloadLen >= 10 && pkt->payload[0] == nodeIdentity.getNodeHash()) {
             // TXT_MSG CLI
             if (!repeaterHelper.allowRequest()) {
                 statsRecordRateLimited();
