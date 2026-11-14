@@ -236,9 +236,6 @@ extern TimeSync timeSync;
 extern AdvertGenerator advertGen;
 extern TelemetryManager telemetry;
 extern RepeaterHelper repeaterHelper;
-#ifdef ENABLE_PACKET_LOG
-extern PacketLogger packetLogger;
-#endif
 extern SessionManager sessionManager;
 extern MeshCrypto meshCrypto;
 extern ContactManager contactMgr;

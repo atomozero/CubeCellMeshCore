@@ -420,21 +420,6 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
     else if (strcmp(cmd, "set flood.advert.interval") == 0 || strcmp(cmd, "get flood.advert.interval") == 0) {
         CP("flood.adv.int:%luh\n", floodAdvertIntervalMs > 0 ? floodAdvertIntervalMs / 3600000UL : 0);
     }
-#ifdef ENABLE_PACKET_LOG
-    else if (strcmp(cmd, "log") == 0) {
-        CP("Log:%s N:%lu/%d\n", packetLogger.isEnabled() ? "on" : "off",
-            packetLogger.getTotalLogged(), packetLogger.getCount());
-        uint8_t show = packetLogger.getCount();
-        if (show > 8) show = 8;
-        for (uint8_t i = 0; i < show; i++) {
-            if (ctx.buf && ctx.len >= ctx.maxLen - 32) break;
-            const PacketLogEntry* e = packetLogger.getEntry(i);
-            if (e) CP(" %s r%d t%d %02X>%02X s%d\n",
-                e->direction ? "TX" : "RX", e->routeType, e->payloadType,
-                e->srcHash, e->dstHash, e->snr);
-        }
-    }
-#endif
     // --- Admin-only commands ---
     else if (!isAdmin) {
         return false;  // not a read-only command; caller handles admin gate
@@ -905,53 +890,6 @@ void processCommand(char* cmd) {
             LOG_RAW("Key set %02X - reboot\n\r", nodeIdentity.getNodeHash());
         } else LOG_RAW("E:64 hex chars (32-byte seed)\n\r");
     }
-    #ifdef ENABLE_CRYPTO_TESTS
-    else if (strcmp(cmd, "test") == 0) {
-        const uint8_t pubkey[] = {
-            0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7,
-            0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
-            0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25,
-            0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a
-        };
-        const uint8_t sig[] = {
-            0xe5, 0x56, 0x43, 0x00, 0xc3, 0x60, 0xac, 0x72,
-            0x90, 0x86, 0xe2, 0xcc, 0x80, 0x6e, 0x82, 0x8a,
-            0x84, 0x87, 0x7f, 0x1e, 0xb8, 0xe5, 0xd9, 0x74,
-            0xd8, 0x73, 0xe0, 0x65, 0x22, 0x49, 0x01, 0x55,
-            0x5f, 0xb8, 0x82, 0x15, 0x90, 0xa3, 0x3b, 0xac,
-            0xc6, 0x1e, 0x39, 0x70, 0x1c, 0xf9, 0xb4, 0x6b,
-            0xd2, 0x5b, 0xf5, 0xf0, 0x59, 0x5b, 0xbe, 0x24,
-            0x65, 0x51, 0x41, 0x43, 0x8e, 0x7a, 0x10, 0x0b
-        };
-        bool ok = IdentityManager::verify(sig, pubkey, NULL, 0);
-        LOG_RAW("RFC8032 Verify (empty msg): %s\n\r", ok ? "PASS" : "FAIL");
-        const uint8_t seed[] = {
-            0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60,
-            0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
-            0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19,
-            0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60
-        };
-        const uint8_t expected_sig[] = {
-            0xe5, 0x56, 0x43, 0x00, 0xc3, 0x60, 0xac, 0x72,
-            0x90, 0x86, 0xe2, 0xcc, 0x80, 0x6e, 0x82, 0x8a,
-            0x84, 0x87, 0x7f, 0x1e, 0xb8, 0xe5, 0xd9, 0x74,
-            0xd8, 0x73, 0xe0, 0x65, 0x22, 0x49, 0x01, 0x55,
-            0x5f, 0xb8, 0x82, 0x15, 0x90, 0xa3, 0x3b, 0xac,
-            0xc6, 0x1e, 0x39, 0x70, 0x1c, 0xf9, 0xb4, 0x6b,
-            0xd2, 0x5b, 0xf5, 0xf0, 0x59, 0x5b, 0xbe, 0x24,
-            0x65, 0x51, 0x41, 0x43, 0x8e, 0x7a, 0x10, 0x0b
-        };
-        uint8_t test_pubkey[32];
-        uint8_t test_privkey[64];
-        ed25519_create_keypair(test_pubkey, test_privkey, seed);
-        bool pubkey_ok = (memcmp(test_pubkey, pubkey, 32) == 0);
-        LOG_RAW("RFC8032 Keypair gen: %s\n\r", pubkey_ok ? "PASS" : "FAIL");
-        uint8_t test_sig[64];
-        ed25519_sign(test_sig, NULL, 0, test_pubkey, test_privkey);
-        bool sign_ok = (memcmp(test_sig, expected_sig, 64) == 0);
-        LOG_RAW("RFC8032 Sign (empty msg): %s\n\r", sign_ok ? "PASS" : "FAIL");
-    }
-    #endif
     else if (strcmp(cmd, "nodetype chat") == 0) {
         uint8_t flags = nodeIdentity.getFlags();
         flags = (flags & 0xF0) | MC_TYPE_CHAT_NODE;
@@ -979,17 +917,6 @@ void processCommand(char* cmd) {
     else if (strcmp(cmd, "savestats") == 0) {
         savePersistentStats(); LOG_RAW("Stats saved\n\r");
     }
-#ifdef ENABLE_PACKET_LOG
-    else if (strcmp(cmd, "log start") == 0) {
-        packetLogger.setEnabled(true); LOG_RAW("Log:on\n\r");
-    }
-    else if (strcmp(cmd, "log stop") == 0) {
-        packetLogger.setEnabled(false); LOG_RAW("Log:off\n\r");
-    }
-    else if (strcmp(cmd, "log erase") == 0) {
-        packetLogger.clear(); LOG_RAW("Log erased\n\r");
-    }
-#endif
     else if (strcmp(cmd, "contacts") == 0) {
         LOG_RAW("Contacts: %d\n\r", contactMgr.getCount());
         for (uint8_t i = 0; i < contactMgr.getCount(); i++) {
@@ -1040,42 +967,6 @@ void processCommand(char* cmd) {
     else if (strncmp(cmd, "set radio ", 10) == 0) {
         parseAndApplyRadio(cmd + 10, ',');
     }
-#ifdef ENABLE_DAILY_REPORT
-    else if (strcmp(cmd, "report") == 0) {
-        LOG_RAW("Report:%s Time:%02d:%02d Dest:%s\n\r",
-            reportEnabled ? "ON" : "OFF", reportHour, reportMinute,
-            isPubKeySet(reportDestPubKey) ? "set" : "none");
-    }
-    else if (strcmp(cmd, "report on") == 0) {
-        if (isPubKeySet(reportDestPubKey)) { reportEnabled = true; saveConfig(); LOG_RAW("Report ON\n\r"); }
-        else LOG_RAW("No dest key\n\r");
-    }
-    else if (strcmp(cmd, "report off") == 0) {
-        reportEnabled = false; saveConfig(); LOG_RAW("Report OFF\n\r");
-    }
-    else if (strcmp(cmd, "report clear") == 0) {
-        reportEnabled = false; memset(reportDestPubKey, 0, REPORT_PUBKEY_SIZE);
-        saveConfig(); LOG_RAW("Report cleared\n\r");
-    }
-    else if (strcmp(cmd, "report test") == 0) {
-        if (isPubKeySet(reportDestPubKey)) {
-            extern bool sendDailyReport();
-            LOG_RAW(sendDailyReport() ? "Report sent\n\r" : "Report fail\n\r");
-        } else LOG_RAW("No dest key\n\r");
-    }
-    else if (strncmp(cmd, "report dest ", 12) == 0) {
-        Contact* c = contactMgr.findByName(cmd + 12);
-        if (c) { memcpy(reportDestPubKey, c->pubKey, REPORT_PUBKEY_SIZE); saveConfig(); LOG_RAW("Dest:%s\n\r", c->name); }
-        else LOG_RAW("'%s' not found\n\r", cmd + 12);
-    }
-    else if (strncmp(cmd, "report time ", 12) == 0) {
-        int h, m;
-        if (sscanf(cmd + 12, "%d:%d", &h, &m) == 2 && h >= 0 && h <= 23 && m >= 0 && m <= 59) {
-            reportHour = h; reportMinute = m; saveConfig();
-            LOG_RAW("Report time: %02d:%02d\n\r", reportHour, reportMinute);
-        } else LOG_RAW("Use: report time HH:MM\n\r");
-    }
-#endif
 #ifndef LITE_MODE
     else if (strncmp(cmd, "msg ", 4) == 0) {
         char* nameStart = cmd + 4;
@@ -1176,40 +1067,6 @@ uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, 
             RESP_APPEND("guest set\n");
         } else RESP_APPEND("E:0-15\n");
     }
-#ifdef ENABLE_DAILY_REPORT
-    else if (strcmp(cmd, "report") == 0) {
-        RESP_APPEND("Rpt:%s %02d:%02d D:%02X%s\n",
-            reportEnabled ? "ON" : "OFF", reportHour, reportMinute,
-            reportDestPubKey[0], isPubKeySet(reportDestPubKey) ? "" : "(no)");
-    }
-    else if (strncmp(cmd, "report dest ", 12) == 0) {
-        Contact* c = contactMgr.findByName(cmd + 12);
-        if (c) { memcpy(reportDestPubKey, c->pubKey, REPORT_PUBKEY_SIZE); saveConfig(); RESP_APPEND("Dest:%s\n", c->name); }
-        else RESP_APPEND("E:not found\n");
-    }
-    else if (strcmp(cmd, "report on") == 0) {
-        if (isPubKeySet(reportDestPubKey)) { reportEnabled = true; saveConfig(); RESP_APPEND("Rpt ON\n"); }
-        else RESP_APPEND("E:no dest\n");
-    }
-    else if (strcmp(cmd, "report off") == 0) {
-        reportEnabled = false; saveConfig(); RESP_APPEND("Rpt OFF\n");
-    }
-    else if (strcmp(cmd, "report test") == 0) {
-        extern uint16_t generateReportContent(char*, uint16_t);
-        ctx.len = generateReportContent(response, maxLen - 1);
-    }
-    else if (strcmp(cmd, "report nodes") == 0) {
-        extern uint16_t generateNodesReport(char*, uint16_t);
-        ctx.len = generateNodesReport(response, maxLen - 1);
-    }
-    else if (strncmp(cmd, "report time ", 12) == 0) {
-        int h, m;
-        if (sscanf(cmd + 12, "%d:%d", &h, &m) == 2 && h >= 0 && h <= 23 && m >= 0 && m <= 59) {
-            reportHour = h; reportMinute = m; saveConfig();
-            RESP_APPEND("Rpt %02d:%02d\n", h, m);
-        } else RESP_APPEND("E:HH:MM\n");
-    }
-#endif
     else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "?") == 0) {
         RESP_APPEND("status stats time ver clock nodes identity telemetry\n");
         RESP_APPEND("radio location ping rxboost sleep alert powersaving\n");
@@ -1494,9 +1351,6 @@ bool transmitPacket(MCPacket* pkt) {
     bool isFlood = pkt->header.isFlood();
     repeaterHelper.recordTx(isFlood);
 
-    #ifdef ENABLE_PACKET_LOG
-    packetLogger.log(pkt, true);
-    #endif
 
     radio.finishTransmit();
     dio1Flag = false;
@@ -1841,48 +1695,6 @@ void sendDirectMessage(const char* recipientName, const char* message) {
 //=============================================================================
 // Daily Report - Send encrypted status message to admin
 //=============================================================================
-#ifdef ENABLE_DAILY_REPORT
-/**
- * Generate report content string
- * @param buf Output buffer
- * @param maxLen Buffer size
- * @return Length of generated string
- */
-uint16_t generateReportContent(char* buf, uint16_t maxLen) {
-    uint16_t len = 0;
-
-    // Format: "NodeName: Report\nUp:XXh\nRX:X TX:X FWD:X ERR:X\nBat:XmV"
-    int n = snprintf(buf, maxLen,
-        "%s: Report\n"
-        "Up:%luh\n"
-        "RX:%lu TX:%lu FWD:%lu ERR:%lu\n"
-        "Bat:%dmV",
-        nodeIdentity.getNodeName(),
-        millis() / 3600000,  // Hours
-        rxCount, txCount, fwdCount, errCount,
-        telemetry.getBatteryMv()
-    );
-
-    if (n > 0 && n < (int)maxLen) {
-        len = n;
-    }
-
-    return len;
-}
-
-uint16_t generateNodesReport(char* buf, uint16_t maxLen) {
-    uint8_t cnt = seenNodes.getCount();
-    int n = snprintf(buf, maxLen, "Nodes(%d):", cnt);
-    for (uint8_t i = 0; i < cnt && n < (int)maxLen - 1; i++) {
-        const SeenNode* nd = seenNodes.getNode(i);
-        if (nd) {
-            n += snprintf(buf + n, maxLen - n, "\n%s[%d]", nd->name, nd->lastRssi);
-        }
-    }
-    return (n > 0 && n < (int)maxLen) ? n : 0;
-}
-
-#endif // ENABLE_DAILY_REPORT
 
 /**
  * Send encrypted text message to a destination public key
@@ -1934,66 +1746,6 @@ bool sendEncryptedToAdmin(const uint8_t* destPubKey, const char* text, uint16_t 
     return true;
 }
 
-#ifdef ENABLE_DAILY_REPORT
-bool sendReportMessage(const char* text, uint16_t textLen) {
-    return sendEncryptedToAdmin(reportDestPubKey, text, textLen);
-}
-
-/**
- * Send daily report (stats + nodes list)
- */
-bool sendDailyReport() {
-    char reportText[96];
-    uint16_t textLen = generateReportContent(reportText, sizeof(reportText) - 1);
-    if (textLen == 0) return false;
-
-    if (!sendReportMessage(reportText, textLen)) return false;
-
-    // Send nodes report
-    uint16_t nodesLen = generateNodesReport(reportText, sizeof(reportText) - 1);
-    if (nodesLen > 0) {
-        sendReportMessage(reportText, nodesLen);
-    }
-    return true;
-}
-
-/**
- * Check if it's time to send daily report
- * Called from main loop
- */
-void checkDailyReport() {
-    // Only check if report is enabled and time is synced
-    if (!reportEnabled || !timeSync.isSynchronized()) {
-        return;
-    }
-
-    // Get current time components
-    uint32_t now = timeSync.getTimestamp();
-    uint32_t dayNumber = now / 86400;  // Days since epoch
-
-    // Already sent today?
-    if (dayNumber == lastReportDay) {
-        return;
-    }
-
-    // Calculate seconds since midnight
-    uint32_t secondsToday = now % 86400;
-    uint32_t targetSeconds = (uint32_t)reportHour * 3600 + (uint32_t)reportMinute * 60;
-
-    // Check if it's time (within a 60-second window to avoid missing)
-    if (secondsToday >= targetSeconds && secondsToday < targetSeconds + 60) {
-        LOG(TAG_INFO " Rpt time %02d:%02d\n\r",
-            reportHour, reportMinute);
-
-        if (sendDailyReport()) {
-            lastReportDay = dayNumber;  // Mark as sent today
-            LOG(TAG_OK " Rpt sent\n\r");
-        } else {
-            LOG(TAG_ERROR " Rpt fail\n\r");
-        }
-    }
-}
-#endif // ENABLE_DAILY_REPORT
 
 /**
  * Send node alert when new node/repeater is discovered
@@ -2859,9 +2611,6 @@ void processReceivedPacket(MCPacket* pkt) {
     repeaterHelper.recordRx(isFlood);
     repeaterHelper.updateRadioStats(pkt->rssi, pkt->snr);
 
-    #ifdef ENABLE_PACKET_LOG
-    packetLogger.log(pkt, false);
-    #endif
 
     LOG(TAG_RX " r%d t%d p=%d l=%d %d/%d.%d\n\r",
         pkt->header.getRouteType(), pkt->header.getPayloadType(),
@@ -3407,10 +3156,6 @@ void loop() {
         }
     }
 
-#ifdef ENABLE_DAILY_REPORT
-    // Check daily report scheduler
-    checkDailyReport();
-#endif
 
     // Power saving when idle
     if (txQueue.getCount() == 0 && !dio1Flag) {

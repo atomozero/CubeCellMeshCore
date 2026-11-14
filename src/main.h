@@ -16,9 +16,6 @@
 
 //#define SILENT                  // Disable ALL serial output
 #define LITE_MODE                 // Remove non-essential features for space saving
-#define MINIMAL_DEBUG             // Minimal debug output (no fancy ANSI tables)
-//#define ENABLE_DAILY_REPORT       // Disabled - repeaters can't receive TXT replies
-//#define ANSI_COLORS             // Disabled to save ~500 bytes Flash
 
 // Node identity - set to 0 to auto-generate from chip ID
 #define MC_NODE_ID          0
@@ -95,17 +92,6 @@
 // Debug output macros
 //=============================================================================
 #ifdef SILENT
-    // No output at all
-    #define ANSI_RESET ""
-    #define ANSI_BOLD ""
-    #define ANSI_DIM ""
-    #define ANSI_RED ""
-    #define ANSI_GREEN ""
-    #define ANSI_YELLOW ""
-    #define ANSI_BLUE ""
-    #define ANSI_MAGENTA ""
-    #define ANSI_CYAN ""
-    #define ANSI_WHITE ""
     #define TAG_INFO    ""
     #define TAG_OK      ""
     #define TAG_WARN    ""
@@ -125,46 +111,7 @@
     #define LOG(...)
     #define LOG_RAW(...)
     #define LOG_HEX(buf, len)
-#elif defined(MINIMAL_DEBUG)
-    // Minimal output with optional ANSI colors, no fancy formatting
-    #ifdef ANSI_COLORS
-    #define ANSI_RESET      "\033[0m"
-    #define ANSI_BOLD       "\033[1m"
-    #define ANSI_DIM        "\033[2m"
-    #define ANSI_RED        "\033[31m"
-    #define ANSI_GREEN      "\033[32m"
-    #define ANSI_YELLOW     "\033[33m"
-    #define ANSI_BLUE       "\033[34m"
-    #define ANSI_MAGENTA    "\033[35m"
-    #define ANSI_CYAN       "\033[36m"
-    #define ANSI_WHITE      "\033[37m"
-    #define TAG_INFO    ANSI_CYAN "[I]" ANSI_RESET
-    #define TAG_OK      ANSI_GREEN "[OK]" ANSI_RESET
-    #define TAG_WARN    ANSI_YELLOW "[W]" ANSI_RESET
-    #define TAG_ERROR   ANSI_RED "[E]" ANSI_RESET
-    #define TAG_FATAL   ANSI_BOLD ANSI_RED "[!]" ANSI_RESET
-    #define TAG_RX      ANSI_GREEN "[RX]" ANSI_RESET
-    #define TAG_TX      ANSI_MAGENTA "[TX]" ANSI_RESET
-    #define TAG_FWD     ANSI_BLUE "[FW]" ANSI_RESET
-    #define TAG_NODE    ANSI_YELLOW "[N]" ANSI_RESET
-    #define TAG_RADIO   ANSI_CYAN "[R]" ANSI_RESET
-    #define TAG_CONFIG  ANSI_WHITE "[C]" ANSI_RESET
-    #define TAG_SYSTEM  ANSI_BOLD ANSI_CYAN "[S]" ANSI_RESET
-    #define TAG_PING    ANSI_MAGENTA "[P]" ANSI_RESET
-    #define TAG_ADVERT  ANSI_YELLOW "[A]" ANSI_RESET
-    #define TAG_AUTH    ANSI_CYAN "[AU]" ANSI_RESET
-    #define TAG_DISCOVERY ANSI_BLUE "[D]" ANSI_RESET
-    #else
-    #define ANSI_RESET ""
-    #define ANSI_BOLD ""
-    #define ANSI_DIM ""
-    #define ANSI_RED ""
-    #define ANSI_GREEN ""
-    #define ANSI_YELLOW ""
-    #define ANSI_BLUE ""
-    #define ANSI_MAGENTA ""
-    #define ANSI_CYAN ""
-    #define ANSI_WHITE ""
+#else
     #define TAG_INFO    "[I]"
     #define TAG_OK      "[OK]"
     #define TAG_WARN    "[W]"
@@ -181,48 +128,8 @@
     #define TAG_ADVERT  "[A]"
     #define TAG_AUTH    "[AU]"
     #define TAG_DISCOVERY "[D]"
-    #endif
     inline void printTimestamp() {
         Serial.printf("%lu ", millis()/1000);
-    }
-    #define LOG(...) do { printTimestamp(); Serial.printf(__VA_ARGS__); } while(0)
-    #define LOG_RAW(...) Serial.printf(__VA_ARGS__)
-    #define LOG_HEX(buf, len) do { \
-        for(uint16_t i=0; i<len; i++) Serial.printf("%02X", buf[i]); \
-    } while(0)
-#else
-    // Full ANSI color output
-    #define ANSI_RESET      "\033[0m"
-    #define ANSI_BOLD       "\033[1m"
-    #define ANSI_DIM        "\033[2m"
-    #define ANSI_RED        "\033[31m"
-    #define ANSI_GREEN      "\033[32m"
-    #define ANSI_YELLOW     "\033[33m"
-    #define ANSI_BLUE       "\033[34m"
-    #define ANSI_MAGENTA    "\033[35m"
-    #define ANSI_CYAN       "\033[36m"
-    #define ANSI_WHITE      "\033[37m"
-    #define TAG_INFO    ANSI_CYAN "[INFO]" ANSI_RESET
-    #define TAG_OK      ANSI_GREEN "[OK]" ANSI_RESET
-    #define TAG_WARN    ANSI_YELLOW "[WARN]" ANSI_RESET
-    #define TAG_ERROR   ANSI_RED "[ERROR]" ANSI_RESET
-    #define TAG_FATAL   ANSI_BOLD ANSI_RED "[FATAL]" ANSI_RESET
-    #define TAG_RX      ANSI_GREEN "[RX]" ANSI_RESET
-    #define TAG_TX      ANSI_MAGENTA "[TX]" ANSI_RESET
-    #define TAG_FWD     ANSI_BLUE "[FWD]" ANSI_RESET
-    #define TAG_NODE    ANSI_YELLOW "[NODE]" ANSI_RESET
-    #define TAG_RADIO   ANSI_CYAN "[RADIO]" ANSI_RESET
-    #define TAG_CONFIG  ANSI_WHITE "[CONFIG]" ANSI_RESET
-    #define TAG_SYSTEM  ANSI_BOLD ANSI_CYAN "[SYSTEM]" ANSI_RESET
-    #define TAG_PING    ANSI_MAGENTA "[PING]" ANSI_RESET
-    #define TAG_ADVERT  ANSI_YELLOW "[ADVERT]" ANSI_RESET
-    #define TAG_AUTH    ANSI_CYAN "[AUTH]" ANSI_RESET
-    #define TAG_DISCOVERY ANSI_BLUE "[DISC]" ANSI_RESET
-    inline void printTimestamp() {
-        uint32_t sec = millis() / 1000;
-        uint32_t min = sec / 60;
-        uint32_t hr = min / 60;
-        Serial.printf(ANSI_DIM "%02lu:%02lu:%02lu" ANSI_RESET " ", hr % 100, min % 60, sec % 60);
     }
     #define LOG(...) do { printTimestamp(); Serial.printf(__VA_ARGS__); } while(0)
     #define LOG_RAW(...) Serial.printf(__VA_ARGS__)
