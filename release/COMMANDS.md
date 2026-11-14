@@ -203,18 +203,6 @@ Automatic mesh health monitoring. Checks for offline nodes (>30 min) and sends a
 | `alert clear` | Clear alert configuration |
 | `alert test` | Send a test alert (serial only) |
 
-## Daily Report
-
-| Command | Description |
-|---------|-------------|
-| `report` | Show report status (on/off, time, destination) |
-| `report on` | Enable daily report (requires destination key) |
-| `report off` | Disable daily report |
-| `report test` | Send a test report immediately |
-| `report nodes` | Send a nodes report immediately |
-| `report time HH:MM` | Set report send time (24h format) |
-| `report dest <name>` | Set report destination (by contact name) |
-| `report clear` | Clear destination key and disable report |
 
 ## Quiet Hours
 
@@ -283,16 +271,6 @@ Default limits: Login 5/min, Request 30/min, Forward 100/min.
 | `set prv.key <hex>` | Import Ed25519 seed and regenerate identity (serial only) **MeshCore** |
 | `get public.key` | Show public key (hex, serial only) **MeshCore** |
 
-## Packet Log
-
-Requires `ENABLE_PACKET_LOG` compile flag.
-
-| Command | Description |
-|---------|-------------|
-| `log` | Show packet log count and recent entries |
-| `log start` | Enable packet logging (serial only) |
-| `log stop` | Disable packet logging (serial only) |
-| `log erase` | Clear packet log (serial only) |
 
 ## Serial-Only Commands
 
@@ -313,9 +291,8 @@ These commands are only available via USB serial console, not remotely:
 | `tempradio ...` | Temporary radio parameters |
 | `set radio ...` | Set radio parameters |
 | `set freq <MHz>` | Set frequency only |
-| `log start\|stop\|erase` | Packet log control |
 | `alert test` | Send test alert |
-| `msg <name> <message>` | Send direct message to contact |
+| `msg <name> <message>` | Send direct message to contact (only in builds without `LITE_MODE`) |
 
 ## Remote Configuration (via MeshCore app)
 
@@ -357,7 +334,6 @@ alert on/off/dest/clear  mailbox clear
 quiet <start> <end>  quiet off
 region put/remove/allowf/denyf <name>  region save  region load
 ratelimit on/off/reset  clear stats  neighbor.remove <hex>
-report on/off/dest/time/test/nodes
 save  reset  reboot  clkreboot
 ```
 

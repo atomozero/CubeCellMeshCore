@@ -8,8 +8,14 @@ CubeCellMeshCore is a MeshCore-compatible repeater firmware for Heltec CubeCell 
 
 ```
 src/
-├── main.cpp              # Main firmware (~3070 lines)
-├── main.h                # Configuration defines
+├── main.cpp              # setup() and loop()
+├── main.h                # Configuration defines + shared prototypes
+│
+├── cli/
+│   └── Commands.cpp      # Serial + remote CLI (CmdCtx, dispatchSharedCommand,
+│                         #   processCommand, processRemoteCommand)
+├── radio/
+│   └── Radio.cpp         # Radio setup/TX/RX, airtime/delays, sleep, watchdog
 │
 ├── core/                 # Core system modules (extracted)
 │   ├── globals.h         # Global variable declarations (extern)
@@ -18,6 +24,9 @@ src/
 │   └── Config.h/.cpp     # EEPROM configuration management
 │
 └── mesh/                 # MeshCore protocol implementation
+    ├── Messaging.cpp     # Ping/trace, ADVERT beacon, direct msg, alerts, health
+    ├── PacketHandler.cpp # processReceivedPacket, forwarding, discovery,
+    │                     #   ANON_REQ login, authenticated requests, TXT CLI
     ├── Advert.h          # ADVERT packet generation
     ├── Contacts.h        # Contact management
     ├── Crypto.h          # Encryption helpers
@@ -38,27 +47,6 @@ docs/
 └── API.md                # API reference
 ```
 
-## Future Modular Structure
-
-Additional modules can be extracted from main.cpp:
-
-```
-src/
-├── handlers/             # Packet and command handlers
-│   ├── SerialCommands.*  # Serial console command processing (~1100 lines)
-│   ├── RemoteCommands.*  # Remote CLI via mesh network (~200 lines)
-│   └── PacketHandler.*   # Incoming packet processing (~700 lines)
-│
-├── services/             # High-level services
-│   └── Messaging.*       # ADVERT, alerts, reports (~500 lines)
-│
-└── core/
-    └── Radio.cpp/.h      # SX1262 radio management
-```
-
-**Note**: Further module extraction requires careful handling of the CubeCell-specific
-includes (`cyPm.c`, `innerWdt.h`) which contain function definitions and cannot be
-included from multiple compilation units.
 
 ## Module Descriptions
 
@@ -132,6 +120,8 @@ included from multiple compilation units.
 Custom implementation optimized for CubeCell:
 - **Compact mode**: Uses double-and-add algorithm instead of precomputed tables
 - **Memory savings**: ~97KB Flash saved vs standard implementation
+- **Compact scalar arithmetic**: `sc.c` uses a loop-based modL (TweetNaCl) instead of
+  orlp's unrolled code (~12.8KB Flash saved); results verified identical to orlp
 - **Compatibility**: Produces signatures identical to orlp/ed25519
 
 ## Data Flow
@@ -175,11 +165,11 @@ Key hardware constraints:
 ## Memory Layout
 
 ### Flash (128 KB total)
-- Firmware code: ~128 KB (97.7%), ~3 KB free
+- Firmware code: ~114 KB (87.0%), ~17 KB free
 - Ed25519 compact implementation saves ~97KB vs standard tables
 
 ### RAM (16 KB total)
-- Static globals (.data + .bss): ~8.1 KB (49.7%)
+- Static globals (.data + .bss): ~8.4 KB (52.3% as reported by PlatformIO)
 - Stack (PSoC 4000 default): ~2 KB
 - Heap (RadioLib, Crypto): ~1-2 KB
 - Free at runtime: ~4 KB (shared between stack growth and heap)
@@ -209,26 +199,3 @@ Reduced memory footprint:
 ### SILENT Mode
 No serial output, maximum power savings.
 
-## Future Refactoring
-
-The following modules are candidates for extraction from main.cpp:
-
-1. **SerialCommands** (~1100 lines)
-   - `processCommand()` - Serial console handler
-   - `checkSerial()` - Serial input processing
-
-2. **RemoteCommands** (~200 lines)
-   - `processRemoteCommand()` - Mesh CLI handler
-
-3. **PacketHandler** (~700 lines)
-   - `processReceivedPacket()` - Main dispatcher
-   - `processDiscoverRequest()` - Discovery handling
-   - `processAuthenticatedRequest()` - Auth requests
-   - `processAnonRequest()` - Anonymous requests
-
-4. **Messaging** (~500 lines)
-   - `sendAdvert()` - ADVERT transmission
-   - `sendPing()` - Broadcast test packet
-   - `sendDirectedPing()` / `sendPong()` - Directed ping/pong
-   - `sendDailyReport()` - Scheduled reports
-   - `sendNodeAlert()` - Node discovery alerts

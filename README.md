@@ -65,19 +65,25 @@ See [Command Reference](release/COMMANDS.md) for the full list of 80+ commands.
 
 Commands use MeshCore-compatible naming (e.g. `set name`, `get name`, `set tx`, `password`). Legacy names are kept as aliases for backwards compatibility.
 
-Key command categories: status, configuration, radio, network, mailbox, health monitor, daily report, alerts, rate limiting, ping/trace, identity/security, and system administration. All shared commands are available both via serial console and remotely via the MeshCore app's encrypted CLI.
+Key command categories: status, configuration, radio, network, mailbox, health monitor, alerts, rate limiting, ping/trace, identity/security, and system administration. All shared commands are available both via serial console and remotely via the MeshCore app's encrypted CLI.
 
 ## Project Structure
 
 ```
 src/
-├── main.cpp          # Main firmware (~3070 lines)
-├── main.h            # Configuration and defines
+├── main.cpp          # setup() and loop()
+├── main.h            # Configuration, defines and shared prototypes
+├── cli/
+│   └── Commands.cpp  # Serial + remote CLI command handlers
+├── radio/
+│   └── Radio.cpp     # Radio setup/TX/RX, timings, power management
 ├── core/             # Core modules
 │   ├── globals.h/.cpp  # Global variables
 │   ├── Led.h/.cpp      # LED signaling
 │   └── Config.h/.cpp   # EEPROM config
 └── mesh/             # MeshCore protocol
+    ├── Messaging.cpp     # Ping, ADVERT beacon, alerts, health check
+    ├── PacketHandler.cpp # RX processing, forwarding, auth, remote CLI
     ├── Advert.h      # ADVERT generation
     ├── Contacts.h    # Contact management
     ├── Crypto.h      # Encryption helpers
@@ -246,7 +252,7 @@ MIT License - See LICENSE file for details.
   - Network: `get/set flood.advert.interval`, `get/set agc.reset.interval`
   - Security: `setperm <pubkey> <perm>` (per-node ACL permissions)
   - Stats aliases: `stats-core`, `stats-radio`, `stats-packets`
-  - System: `board`, `clkreboot`, `log`/`log start`/`log stop`/`log erase`
+  - System: `board`, `clkreboot`
 
 ### v0.5.1 (2026-02-15)
 - **MeshCore CLI Compatibility** - Renamed commands to match MeshCore standard naming

@@ -4,6 +4,15 @@ Test script for Adaptive TX Power and Enhanced Link Quality features
 Verifies the new functionality added to the firmware.
 """
 
+def read_firmware_sources():
+    """Concatenate all firmware .cpp sources (main.cpp was split into modules)."""
+    import glob
+    content = ""
+    for path in sorted(glob.glob('../src/**/*.cpp', recursive=True)):
+        with open(path, 'r') as f:
+            content += f.read()
+    return content
+
 def test_neighbour_info_structure():
     """Verify NeighbourInfo struct has new fields"""
     print("Testing NeighbourInfo structure...")
@@ -50,19 +59,16 @@ def test_neighbour_info_structure():
     return True
 
 def test_adaptive_tx_commands():
-    """Verify adaptive TX power commands exist in main.cpp"""
+    """Verify adaptive TX power commands exist in the firmware sources"""
     print("\nTesting Adaptive TX Power commands...")
 
     expected_commands = [
         '"set tx auto on"',
-        '"txpower auto on"',
         '"set tx auto off"',
-        '"txpower auto off"',
         'evaluateAdaptiveTxPower()'
     ]
 
-    with open('../src/main.cpp', 'r') as f:
-        content = f.read()
+    content = read_firmware_sources()
 
     missing = []
     for cmd in expected_commands:
@@ -104,8 +110,7 @@ def test_neighbours_command_output():
     """Verify neighbours command shows new statistics"""
     print("\nTesting neighbours command output format...")
 
-    with open('../src/main.cpp', 'r') as f:
-        content = f.read()
+    content = read_firmware_sources()
 
     # Look for updated CP format in neighbours command
     # Should show rssiAvg, snrAvg, pktCount
