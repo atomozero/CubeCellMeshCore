@@ -152,6 +152,13 @@ bool shouldForward(MCPacket* pkt) {
             return false;
         }
 
+        // 'flood.max' limits ADVERT floods only (like MeshCore flood_max_advert,
+        // default 8). Other floods are limited only by the path space above.
+        if (pkt->header.getPayloadType() == MC_PAYLOAD_ADVERT &&
+            hops >= repeaterHelper.getMaxFloodHops()) {
+            return false;
+        }
+
         // Loop detection with configurable strictness
         if (loopDetectMode != LOOP_DETECT_OFF) {
             uint8_t occurrences = 0;

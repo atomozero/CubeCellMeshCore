@@ -533,8 +533,8 @@ save
     <tr><td><code>get tx</code></td><td>Potenza TX corrente</td></tr>
     <tr><td><code>get freq</code></td><td>Frequenza radio corrente</td></tr>
     <tr><td><code>get radio</code></td><td>Parametri radio completi</td></tr>
-    <tr><td><code>get repeat</code></td><td>Stato ripetizione e max hop</td></tr>
-    <tr><td><code>get flood.max</code></td><td>Massimo hop flood</td></tr>
+    <tr><td><code>get repeat</code></td><td>Stato ripetizione e limite hop ADVERT</td></tr>
+    <tr><td><code>get flood.max</code></td><td>Limite hop per gli ADVERT inoltrati</td></tr>
     <tr><td><code>get advert.interval</code></td><td>Intervallo ADVERT (minuti)</td></tr>
     <tr><td><code>get guest.password</code></td><td>Password guest</td></tr>
     <tr><td><code>get public.key</code></td><td>Chiave pubblica (hex, solo seriale)</td></tr>
@@ -560,7 +560,7 @@ save
     <tr><td><code>set lat &lt;latitudine&gt;</code></td><td>Latitudine decimale (es. <code>45.123456</code>)</td></tr>
     <tr><td><code>set lon &lt;longitudine&gt;</code></td><td>Longitudine decimale (es. <code>7.654321</code>)</td></tr>
     <tr><td><code>set repeat on|off</code></td><td>Abilita/disabilita ripetizione pacchetti</td></tr>
-    <tr><td><code>set flood.max &lt;n&gt;</code></td><td>Max hop flood (1-15)</td></tr>
+    <tr><td><code>set flood.max &lt;n&gt;</code></td><td>Limite hop per gli ADVERT inoltrati (1-15, default 8). I messaggi non sono limitati</td></tr>
     <tr><td><code>set owner.info &lt;testo&gt;</code></td><td>Info proprietario (max 31 caratteri)</td></tr>
     <tr><td><code>set af &lt;n&gt;</code></td><td>Fattore airtime (decimi: 0=off, 10=1.0x, max 90=9.0x)</td></tr>
     <tr><td><code>set adc.multiplier &lt;n&gt;</code></td><td>Moltiplicatore ADC batteria (decimi: 0=auto, 10=1.0x)</td></tr>
@@ -862,7 +862,7 @@ save
           <tr><td><code>rxboost on</code></td><td>Guadagno RX potenziato: migliore sensibilit&agrave;</td></tr>
           <tr><td><code>set tx 14</code></td><td>Potenza TX massima (14 dBm)</td></tr>
           <tr><td><code>set tx auto off</code></td><td>Potenza fissa, no riduzione adattiva</td></tr>
-          <tr><td><code>set flood.max 15</code></td><td>Massimo hop per pacchetti flood</td></tr>
+          <tr><td><code>set flood.max 15</code></td><td>ADVERT inoltrati fino a 15 hop</td></tr>
           <tr><td><code>set advert.interval 5</code></td><td>ADVERT ogni 5 minuti (scoperta rapida)</td></tr>
           <tr><td><code>set af 0</code></td><td>Duty cycle disabilitato (TX senza limiti)</td></tr>
           <tr><td><code>set txdelay 50</code></td><td>Ritardo ridotto: risposte pi&ugrave; rapide</td></tr>
@@ -906,7 +906,7 @@ save
           <tr><td><code>sleep on</code></td><td>Deep sleep attivo: ~3.5 &micro;A tra le finestre RX</td></tr>
           <tr><td><code>rxboost off</code></td><td>Guadagno RX standard: minor consumo</td></tr>
           <tr><td><code>set tx auto on</code></td><td>TX adattivo: riduce la potenza se non necessaria</td></tr>
-          <tr><td><code>set flood.max 3</code></td><td>Pochi hop: riduce traffico di rete</td></tr>
+          <tr><td><code>set flood.max 3</code></td><td>Solo ADVERT vicini: meno traffico</td></tr>
           <tr><td><code>set advert.interval 30</code></td><td>ADVERT ogni 30 min: meno TX</td></tr>
           <tr><td><code>set af 20</code></td><td>Duty cycle 2x: pi&ugrave; attesa tra le trasmissioni</td></tr>
           <tr><td><code>set txdelay 200</code></td><td>Ritardo maggiore: meno collisioni, pi&ugrave; sleep</td></tr>
@@ -950,7 +950,7 @@ save
           <tr><td><code>sleep on</code></td><td>Deep sleep attivo per risparmiare tra le finestre RX</td></tr>
           <tr><td><code>rxboost on</code></td><td>Guadagno RX potenziato per migliore ricezione</td></tr>
           <tr><td><code>set tx auto on</code></td><td>TX adattivo: potenza variabile in base al link</td></tr>
-          <tr><td><code>set flood.max 7</code></td><td>Buon raggio multi-hop senza eccesso di traffico</td></tr>
+          <tr><td><code>set flood.max 7</code></td><td>ADVERT da un buon raggio multi-hop</td></tr>
           <tr><td><code>set advert.interval 10</code></td><td>ADVERT ogni 10 min: buon compromesso</td></tr>
           <tr><td><code>set af 10</code></td><td>Duty cycle 1.0x: standard</td></tr>
           <tr><td><code>set txdelay 100</code></td><td>Ritardo standard (default)</td></tr>
@@ -979,7 +979,7 @@ save
     <tr><td><strong>sleep</strong></td><td><code>off</code></td><td><code>on</code></td><td><code>off</code></td></tr>
     <tr><td><strong>rxboost</strong></td><td><code>on</code></td><td><code>off</code></td><td><code>off</code></td></tr>
     <tr><td><strong>TX power</strong></td><td><code>14</code> dBm (fisso)</td><td><code>auto on</code></td><td><code>14</code></td></tr>
-    <tr><td><strong>flood.max</strong></td><td><code>15</code></td><td><code>3</code></td><td><code>7</code></td></tr>
+    <tr><td><strong>flood.max</strong> (ADVERT)</td><td><code>15</code></td><td><code>3</code></td><td><code>8</code></td></tr>
     <tr><td><strong>advert.interval</strong></td><td><code>5</code> min</td><td><code>30</code> min</td><td><code>10</code> min</td></tr>
     <tr><td><strong>af (airtime)</strong></td><td><code>0</code> (off)</td><td><code>20</code> (2.0x)</td><td><code>10</code></td></tr>
     <tr><td><strong>txdelay</strong></td><td><code>50</code></td><td><code>200</code></td><td><code>100</code></td></tr>

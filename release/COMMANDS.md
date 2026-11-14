@@ -40,7 +40,7 @@ Commands marked **MeshCore** use the standard MeshCore CLI naming.
 | `get lat` | Show current latitude **MeshCore** |
 | `get lon` | Show current longitude **MeshCore** |
 | `get freq` | Show current radio frequency **MeshCore** |
-| `get flood.max` | Show max flood hops **MeshCore** |
+| `get flood.max` | Show hop limit for forwarded ADVERT floods **MeshCore** |
 | `get guest.password` | Show guest password **MeshCore** |
 | `get public.key` | Show public key (hex, serial only) **MeshCore** |
 | `get owner.info` / `set owner.info` | Show node owner info text **MeshCore** |
@@ -60,7 +60,7 @@ Commands marked **MeshCore** use the standard MeshCore CLI naming.
 | `set lat <latitude>` | Set latitude (decimal, e.g. `45.123456`), saves to EEPROM **MeshCore** |
 | `set lon <longitude>` | Set longitude (decimal, e.g. `7.654321`), saves to EEPROM **MeshCore** |
 | `set repeat on\|off` | Enable/disable packet repeating |
-| `set flood.max <n>` | Set max flood hops (1-15) |
+| `set flood.max <n>` | Hop limit for forwarded ADVERT floods (1-15, default 8); other floods are not limited |
 | `set owner.info <text>` | Set node owner info (max 31 chars) **MeshCore** |
 | `set af <n>` | Set airtime factor (tenths: 0=off, 10=1.0x, max 90=9.0x) **MeshCore** |
 | `set adc.multiplier <n>` | Set battery ADC multiplier (tenths: 0=auto, 10=1.0x, max 100) **MeshCore** |
