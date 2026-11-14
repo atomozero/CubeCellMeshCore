@@ -276,11 +276,13 @@ public:
         for (uint8_t i = 0; i < MC_MAX_CONTACTS; i++) {
             if (contacts[i].valid) {
                 uint32_t ago = (millis() - contacts[i].lastSeen) / 1000;
-                Serial.printf("  [%02X] %s  rssi=%ddBm snr=%.2fdB ago=%lus secret=%s\n\r",
+                int16_t snrQ = contacts[i].lastSnr;  // quarter-dB units
+                uint16_t snrAbs = snrQ < 0 ? -snrQ : snrQ;
+                Serial.printf("  [%02X] %s  rssi=%ddBm snr=%s%u.%02udB ago=%lus secret=%s\n\r",
                               contacts[i].getHash(),
                               contacts[i].name[0] ? contacts[i].name : "(no name)",
                               contacts[i].lastRssi,
-                              contacts[i].lastSnr / 4.0f,
+                              snrQ < 0 ? "-" : "", snrAbs / 4, (snrAbs % 4) * 25,
                               ago,
                               contacts[i].hasSharedSecret ? "yes" : "no");
             }

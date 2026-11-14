@@ -101,17 +101,28 @@ struct CmdCtx {
     uint16_t maxLen;  // buffer capacity (0 for serial)
 };
 
+// Framework's printf implementation (port/printf.c). Using it directly avoids
+// linking newlib's vsnprintf as a second printf engine (~1.2KB Flash).
+extern "C" int _vsnprintf(void (*out)(char, void*, size_t, size_t), char* buffer,
+                          const size_t maxlen, const char* format, va_list va);
+static void cmdOutBuf(char c, void* buf, size_t idx, size_t maxlen) {
+    if (idx < maxlen) ((char*)buf)[idx] = c;
+}
+static inline int cmdVsnprintf(char* buf, size_t n, const char* fmt, va_list ap) {
+    return _vsnprintf(cmdOutBuf, buf, n, fmt, ap);
+}
+
 static void cmdPrint(CmdCtx* ctx, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 static void cmdPrint(CmdCtx* ctx, const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     if (ctx->buf) {
-        int rc = vsnprintf(ctx->buf + ctx->len, ctx->maxLen - ctx->len, fmt, ap);
+        int rc = cmdVsnprintf(ctx->buf + ctx->len, ctx->maxLen - ctx->len, fmt, ap);
         if (rc > 0 && ctx->len + rc < ctx->maxLen) ctx->len += rc;
     } else {
         #ifndef SILENT
         static char tmp[96];
-        vsnprintf(tmp, sizeof(tmp), fmt, ap);
+        cmdVsnprintf(tmp, sizeof(tmp), fmt, ap);
         Serial.print(tmp);
         #endif
     }
