@@ -16,15 +16,15 @@ MeshCore-compatible repeater firmware for Heltec CubeCell HTCC-AB01.
 - **Neighbour Tracking** - Direct repeater discovery via 0-hop ADVERTs
 - **Rate Limiting** - Protection against flood/spam attacks
 - **Persistent Statistics** - Lifetime stats survive reboots (EEPROM)
-- **Daily Reports** - Scheduled status reports sent to admin via mesh
+- **Direct Messages** - Encrypted messages to known contacts from the serial console
 
 ## Hardware
 
 - **Board**: Heltec CubeCell HTCC-AB01
 - **MCU**: ASR6501 SiP (ARM Cortex-M0+ @ 48 MHz + SX1262)
 - **Radio**: SX1262 LoRa transceiver (integrated, no FPU)
-- **Flash**: 128 KB (97.9% used, ~2.7 KB free)
-- **RAM**: 16 KB (48.3% static, ~8 KB free at runtime incl. stack/heap)
+- **Flash**: 128 KB (~88% used, ~16 KB free)
+- **RAM**: 16 KB (~52% static)
 - **Deep sleep**: ~3.5 uA (MCU + radio)
 
 ## Quick Start
@@ -66,6 +66,72 @@ See [Command Reference](release/COMMANDS.md) for the full list of 80+ commands.
 Commands use MeshCore-compatible naming (e.g. `set name`, `get name`, `set tx`, `password`). Legacy names are kept as aliases for backwards compatibility.
 
 Key command categories: status, configuration, radio, network, mailbox, health monitor, alerts, rate limiting, ping/trace, identity/security, and system administration. All shared commands are available both via serial console and remotely via the MeshCore app's encrypted CLI.
+
+## Block Diagram
+
+```mermaid
+flowchart TB
+    subgraph HW["Heltec CubeCell HTCC-AB01"]
+        direction LR
+        RF["SX1262 LoRa radio<br/>EU868"]
+        USB["USB serial<br/>115200 baud"]
+        EE["EEPROM<br/>config, stats, mailbox"]
+        ADC["Battery ADC"]
+        LED["NeoPixel LED"]
+    end
+
+    subgraph FW["Firmware (src/)"]
+        MAIN["main.cpp<br/>setup() / loop()<br/>TX queue scheduler"]
+
+        subgraph MOD["Modules"]
+            RADIO["radio/Radio.cpp<br/>radio setup, TX/RX<br/>airtime, sleep, watchdog"]
+            PH["mesh/PacketHandler.cpp<br/>RX dispatch, forwarding<br/>login, remote CLI"]
+            MSG["mesh/Messaging.cpp<br/>ADVERT beacon, ping/trace<br/>alerts, direct messages"]
+            CLI["cli/Commands.cpp<br/>serial + remote commands"]
+        end
+
+        subgraph LIBS["Protocol and services (header modules)"]
+            REP["Repeater.h<br/>dedup cache, rate limit<br/>sessions, neighbours"]
+            PROTO["Packet.h / Advert.h<br/>RegionMap.h"]
+            SEC["Identity.h / Crypto.h<br/>Contacts.h"]
+            SVC["Mailbox.h / Telemetry.h"]
+            CFG["core/Config + globals"]
+        end
+    end
+
+    ED["lib/ed25519<br/>compact signatures"]
+    APP(["MeshCore app / other nodes"])
+
+    APP <-.->|LoRa packets| RF
+    RF <--> RADIO
+    USB --> CLI
+    MAIN --> RADIO
+    MAIN --> PH
+    MAIN --> MSG
+    MAIN --> CLI
+    PH -- "TXT CLI request" --> CLI
+    PH --> REP
+    PH --> PROTO
+    PH --> SEC
+    PH --> SVC
+    MSG --> PROTO
+    MSG --> SEC
+    CLI --> CFG
+    CLI --> SVC
+    SEC --> ED
+    CFG <--> EE
+    SVC <--> EE
+    SVC --> ADC
+    MAIN --> LED
+```
+
+**Packet path:** the SX1262 raises DIO1 &rarr; `loop()` reads the packet and calls
+`processReceivedPacket()` &rarr; packets addressed to this node (login, CLI,
+discovery, ping/trace) are answered directly; the others go through
+`shouldForward()` (region filter, duplicate cache, hop limit, loop detection)
+and the forward rate limit, then
+enter the TX queue &rarr; the scheduler in `loop()` waits an SNR-weighted delay
+and calls `transmitPacket()` only if the channel is still free.
 
 ## Project Structure
 
@@ -114,6 +180,8 @@ tools/
 - [Architecture Overview](docs/ARCHITECTURE.md) - System design and data flow
 - [API Reference](docs/API.md) - Module APIs and serial commands
 - [Testing Guide](docs/TESTING.md) - Test procedures and verification
+- [Command Guide (English)](docs/CubeCellMeshCore_Command_Guide_EN.html) - All commands, profiles and deployment checklist
+- [Guida Comandi (Italiano)](docs/CubeCellMeshCore_Guida_Comandi_IT.html) - Tutti i comandi, profili e checklist di installazione
 
 ## Testing
 
