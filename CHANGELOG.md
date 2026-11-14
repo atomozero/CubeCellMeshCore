@@ -1,0 +1,131 @@
+# Changelog
+
+All notable changes to CubeCellMeshCore.
+
+## v0.8.0 (2026-11-14)
+- **Lost traffic fixed** - `path_len` decoded as MeshCore does (hop count + hash size); packets with 2/3-byte path hashes are no longer dropped as `Bad pkt`
+- **TRACE** forwarding and **dedup** aligned with MeshCore; `flood.max` enforced on ADVERT floods
+- Own ADVERT echoed by neighbours is ignored
+- **Security** - stack overflow on unauthenticated ANON_REQ fixed; remote admin login refused with the default password; `acl` hides passwords from guests
+- EEPROM overlap between mailbox and region map fixed (config resets on upgrade); MeshCore command aliases restored
+- Refactor: modules (`cli/`, `radio/`, `mesh/`), ~15 KB Flash freed (printf without float, compact ed25519 scalar code), direct messages enabled, dead code removed
+
+## v0.7.0 (2026-03-06)
+- **Enhanced Link Quality Statistics** - RSSI/SNR exponential moving averages (EMA)
+  - New metrics: `rssiAvg`, `snrAvg`, `pktCount`, `pktCountWindow` per neighbour
+  - 60-second measurement windows for packet rate tracking
+  - Updated `neighbours` command shows current and average values
+  - Base for future intelligent routing algorithms
+- **Adaptive TX Power** - Automatic power adjustment based on neighbour SNR
+  - Reduces power when SNR > +10dB (energy saving)
+  - Increases power when SNR < -5dB (better coverage)
+  - Range: 5-21 dBm, 2 dBm steps, evaluated every 60 seconds
+  - Commands: `set tx auto on/off`, `txpower auto on/off`, `txpower <5-21>`
+  - Enabled via serial CLI, disabled by default
+- **Packet Deduplication** - Already implemented, documented
+  - 32-slot ring buffer cache prevents duplicate forwarding
+  - Automatic duplicate detection based on packet ID hash
+  - Reduces network congestion and prevents loops
+- **Test Suite** - New verification script `tools/test_adaptive_tx.py`
+- See [FEATURES_ADDED.md](docs/FEATURES_ADDED.md) for detailed documentation
+
+## v0.6.0 (2026-03-06)
+- **Loop Detection System** - MeshCore 1.14 compatible configurable loop detection
+  - Four modes: `off`, `minimal` (4+ occurrences), `moderate` (2+), `strict` (1, default)
+  - New commands: `get loop.detect`, `set loop.detect {off|minimal|moderate|strict}`
+  - Backward compatible: default mode `strict` maintains original behavior
+  - Stored in EEPROM, survives reboots
+  - Test script: `tools/test_loop_detect.py`
+- **Max Hops Filter for Auto-add Contacts** - MeshCore 1.14 compatible hop count filtering
+  - Limit auto-add of contacts by hop count (0 = no limit, 1-64 = max hops)
+  - New commands: `get autoadd.maxhops`, `set autoadd.maxhops <0-64>`
+  - Default: 0 (no limit, backward compatible)
+  - Reduces contact list pollution from distant nodes
+  - Test script: `tools/test_autoadd_maxhops.py`
+- **Bug Fix: millis() Wraparound Handling** - Fixes scheduler issues after ~49.7 days uptime
+  - Fixed timer comparisons in pendingAdvertTime, tempRadioExpireTime, and rebootTime
+  - Uses signed subtraction to correctly handle millis() wraparound
+  - Prevents scheduled tasks from getting stuck when millis() wraps around
+
+## v0.5.2 (2026-02-15)
+- **Extended MeshCore CLI** - 23 new commands for full MeshCore standard compatibility
+  - `get` aliases: `get name`, `get lat`, `get lon`, `get tx`, `get radio`, `get freq`, `get repeat`, `get flood.max`, `get advert.interval`, `get guest.password`, `get public.key`
+  - Radio: `set freq <MHz>`, `tempradio` with timeout (5th parameter in minutes)
+  - Identity: `get/set prv.key` (Ed25519 seed backup/restore), `get/set owner.info`
+  - Tuning: `get/set af` (airtime factor), `get/set adc.multiplier` (battery ADC calibration)
+  - Forwarding: `get/set txdelay`, `get/set rxdelay`, `get/set direct.txdelay`
+  - Network: `get/set flood.advert.interval`, `get/set agc.reset.interval`
+  - Security: `setperm <pubkey> <perm>` (per-node ACL permissions)
+  - Stats aliases: `stats-core`, `stats-radio`, `stats-packets`
+  - System: `board`, `clkreboot`
+
+## v0.5.1 (2026-02-15)
+- **MeshCore CLI Compatibility** - Renamed commands to match MeshCore standard naming
+  - `set name`, `set lat`, `set lon`, `set tx`, `set advert.interval`, `password`, `set guest.password`
+  - New commands: `ver`, `clock`, `powersaving on/off`, `clear stats`, `neighbor.remove`, `set radio`, `erase`
+  - All legacy command names kept as aliases for backwards compatibility
+
+## v0.5.0 (2026-02-14)
+- **Store-and-Forward Mailbox** - Messages for offline nodes stored and re-delivered automatically
+  - 2 persistent EEPROM slots + 4 volatile RAM overflow slots = 6 messages max
+  - 24h TTL, automatic cleanup, triggered by ADVERT from returning node
+- **Mesh Health Monitor** - Automatic alerts when nodes go offline (>30 min)
+  - Per-node SNR tracking (EMA), offline detection, chat node impersonation for alert delivery
+- **Full Remote Configuration** - All CLI commands available via encrypted mesh channel
+  - sleep, rxboost, mode, alert, report, ratelimit, mailbox - all remotely accessible
+- **Session security** - Idle sessions now expire after 1 hour
+- **Code optimization** - Merged duplicate CLI handlers, eliminated float parsing
+  - Saved 12.9 KB Flash by removing strtod/scanf float dependency chain
+  - Flash usage: 91.0% (was 98.2% in v0.4.0)
+
+## v0.3.5 (2026-01-30)
+- Added temporary radio parameters (`tempradio` command)
+- Change frequency, bandwidth, SF, CR without saving to EEPROM
+- Useful for testing and debugging radio configurations
+- New commands: `radio`, `tempradio <freq> <bw> <sf> <cr>`, `tempradio off`
+
+## v0.3.4 (2026-01-30)
+- Fixed remote CLI commands via mesh network
+- Added TXT_MSG (MC_PAYLOAD_PLAIN) handler for CLI commands
+- Now supports both REQUEST and TXT_MSG methods for remote CLI
+- Added detailed logging for authentication and CLI processing
+
+## v0.3.3 (2026-01-23)
+- Added persistent statistics stored in EEPROM
+- Tracks lifetime: RX/TX/FWD packets, unique nodes, logins, uptime
+- Auto-save every 5 minutes with CRC16 integrity
+- New commands: `lifetime`, `savestats`
+- Boot counter for reliability monitoring
+
+## v0.3.2 (2026-01-23)
+- Added rate limiting for login, request, and forwarding
+- Protection against brute-force login attacks (5/min)
+- Protection against request spam (30/min)
+- Protection against network flooding (100/min forward)
+- New serial command: `ratelimit [on|off|reset]`
+
+## v0.3.1 (2026-01-23)
+- Added neighbour tracking for direct (0-hop) repeater ADVERTs
+- Fixed GET_NEIGHBOURS response format for MeshCore app compatibility
+- Neighbours now visible in MeshCore app "Manage > Neighbours" section
+
+## v0.3.0 (2026-01-23)
+- Fixed MeshCore login protocol compatibility
+- Fixed telemetry response format (CayenneLPP with LPP_VOLTAGE)
+- Added TRACE packet support for ping functionality
+- Improved packet routing (don't forward packets addressed to us)
+- Reduced debug output and Flash usage (94.1%)
+- Telemetry now reports node count
+
+## v0.2.x (2026-01-22)
+- Authentication system with Ed25519 key exchange
+- AES-128-ECB encrypted session support
+- Remote CLI commands via mesh network
+- Node discovery and tracking
+
+## v0.1.0 (2026-01-22)
+- Initial release
+- MeshCore-compatible ADVERT packets
+- Ed25519 signatures working
+- Packet forwarding with CSMA/CA
+- Serial console commands
