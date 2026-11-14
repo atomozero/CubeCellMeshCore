@@ -35,6 +35,9 @@ void setup() {
 
     // Load configuration from EEPROM
     loadConfig();
+    if (strcmp(sessionManager.getAdminPassword(), MC_DEFAULT_ADMIN_PASSWORD) == 0) {
+        LOG_RAW("!! Default admin password: remote admin disabled. Set it with 'password admin <pw>'\n\r");
+    }
 
     // Load persistent statistics
     loadPersistentStats();
@@ -202,7 +205,7 @@ void loop() {
         MCPacket pkt;
         if (txQueue.pop(&pkt)) {
             // SNR adaptive delay using per-packet SNR
-            uint32_t airtime = calculatePacketAirtime(pkt.payloadLen + pkt.pathLen + 2);
+            uint32_t airtime = calculatePacketAirtime(pkt.getTotalSize());
             uint32_t txDelay;
             if (pkt.header.isDirect()) {
                 // DIRECT: half jitter only (higher priority), scaled by direct.txdelay

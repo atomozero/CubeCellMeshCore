@@ -43,7 +43,7 @@ static void sendTraceResponse(uint8_t targetHash, MCPacket* rxPkt) {
     pkt.payload[2] = 'T';
     pkt.payload[3] = 'R';
     pkt.payloadLen = 4 + snprintf((char*)&pkt.payload[4], MC_MAX_PAYLOAD_SIZE - 4,
-                                   "%s %d %d", nodeIdentity.getNodeName(), rxPkt->rssi, rxPkt->pathLen);
+                                   "%s %d %d", nodeIdentity.getNodeName(), rxPkt->rssi, rxPkt->pathHashCount());
 
     LOG(TAG_PING " TR -> %02X\n\r", targetHash);
 
@@ -58,17 +58,26 @@ static void sendTraceResponse(uint8_t targetHash, MCPacket* rxPkt) {
 // Packet Processing
 //=============================================================================
 
-// Generate a simple packet ID from payload hash
+// Packet ID for duplicate detection, same inputs as MeshCore's
+// Packet::calculatePacketHash(): payload type + whole payload (+ path_len for
+// TRACE). Path and route type are excluded so the same packet relayed by
+// different repeaters is recognised as a duplicate. 32-bit FNV-1a.
 uint32_t getPacketId(MCPacket* pkt) {
-    uint32_t hash = 5381;
-    hash = ((hash << 5) + hash) ^ pkt->header.raw;
-    for (uint8_t i = 0; i < pkt->pathLen && i < 8; i++) {
-        hash = ((hash << 5) + hash) ^ pkt->path[i];
+    uint32_t hash = 2166136261UL;
+    uint8_t type = pkt->header.getPayloadType();
+    hash = (hash ^ type) * 16777619UL;
+    if (type == MC_PAYLOAD_PATH_TRACE) {
+        hash = (hash ^ pkt->pathLen) * 16777619UL;
     }
-    for (uint8_t i = 0; i < pkt->payloadLen && i < 16; i++) {
-        hash = ((hash << 5) + hash) ^ pkt->payload[i];
+    for (uint8_t i = 0; i < pkt->payloadLen; i++) {
+        hash = (hash ^ pkt->payload[i]) * 16777619UL;
     }
     return hash;
+}
+
+// True if 'hash' (n bytes) is a prefix of our public key (MeshCore isHashMatch)
+static bool isSelfHash(const uint8_t* hash, uint8_t n) {
+    return memcmp(hash, nodeIdentity.getPublicKey(), n) == 0;
 }
 
 bool shouldForward(MCPacket* pkt) {
@@ -76,6 +85,16 @@ bool shouldForward(MCPacket* pkt) {
     bool isDirect = pkt->header.isDirect();
 
     if (!isFlood && !isDirect) {
+        return false;
+    }
+
+    // Repeating disabled by 'set repeat off'
+    if (!repeaterHelper.isRepeatEnabled()) {
+        return false;
+    }
+
+    // TRACE packets are routed by their payload, handled in processReceivedPacket()
+    if (pkt->header.getPayloadType() == MC_PAYLOAD_PATH_TRACE) {
         return false;
     }
 
@@ -101,10 +120,10 @@ bool shouldForward(MCPacket* pkt) {
         }
     }
 
-    // DIRECT routing: check if we are the next hop (path[0] == our hash)
+    // DIRECT routing: check if we are the next hop (first path entry == our hash)
     if (isDirect) {
-        if (pkt->pathLen == 0) return false;
-        if (pkt->path[0] != nodeIdentity.getNodeHash()) return false;
+        if (pkt->pathHashCount() == 0) return false;
+        if (!isSelfHash(pkt->path, pkt->pathHashSize())) return false;
     }
 
     // Don't forward packets specifically addressed to us
@@ -125,36 +144,35 @@ bool shouldForward(MCPacket* pkt) {
 
     // FLOOD: check path length and loop detection
     if (isFlood) {
-        if (pkt->pathLen >= MC_MAX_PATH_SIZE - 1) {
+        uint8_t hashSize = pkt->pathHashSize();
+        uint8_t hops = pkt->pathHashCount();
+
+        // Room to append our own hash? (MeshCore: (n + 1) * size <= MAX_PATH_SIZE)
+        if ((uint16_t)(hops + 1) * hashSize > MC_MAX_PATH_SIZE || hops + 1 > 63) {
             return false;
         }
 
         // Loop detection with configurable strictness
         if (loopDetectMode != LOOP_DETECT_OFF) {
-            uint8_t myHash = nodeIdentity.getNodeHash();
             uint8_t occurrences = 0;
 
             // Count how many times we appear in the path
-            for (uint8_t i = 0; i < pkt->pathLen; i++) {
-                if (pkt->path[i] == myHash) {
+            for (uint8_t i = 0; i < hops; i++) {
+                if (isSelfHash(&pkt->path[i * hashSize], hashSize)) {
                     occurrences++;
                 }
             }
 
-            // Check against threshold based on mode
-            uint8_t maxOccurrences;
-            switch (loopDetectMode) {
-                case LOOP_DETECT_MINIMAL:
-                    maxOccurrences = 4;  // Allow up to 4 occurrences
-                    break;
-                case LOOP_DETECT_MODERATE:
-                    maxOccurrences = 2;  // Allow up to 2 occurrences
-                    break;
-                case LOOP_DETECT_STRICT:
-                default:
-                    maxOccurrences = 1;  // Allow only 1 occurrence (original behavior)
-                    break;
-            }
+            // Threshold per mode and hash size (same tables as MeshCore
+            // simple_repeater): longer hashes give fewer false matches
+            static const uint8_t maxLoop[3][3] = {
+                { 4, 2, 1 },   // minimal:  1-, 2-, 3-byte hashes
+                { 2, 1, 1 },   // moderate
+                { 1, 1, 1 },   // strict
+            };
+            uint8_t mode = loopDetectMode;
+            if (mode < LOOP_DETECT_MINIMAL || mode > LOOP_DETECT_STRICT) mode = LOOP_DETECT_STRICT;
+            uint8_t maxOccurrences = maxLoop[mode - LOOP_DETECT_MINIMAL][hashSize - 1];
 
             if (occurrences >= maxOccurrences) {
                 return false;  // Loop detected
@@ -223,8 +241,8 @@ bool processDiscoverRequest(MCPacket* pkt) {
 
     // Copy incoming path for response (if any)
     respPkt.pathLen = pkt->pathLen;
-    if (pkt->pathLen > 0) {
-        memcpy(respPkt.path, pkt->path, pkt->pathLen);
+    if (pkt->pathByteLen() > 0) {
+        memcpy(respPkt.path, pkt->path, pkt->pathByteLen());
     }
 
     // Build response payload
@@ -251,7 +269,7 @@ bool processDiscoverRequest(MCPacket* pkt) {
     respPkt.payloadLen = pos;
 
     // Add random delay to spread responses from multiple repeaters
-    uint32_t airtime = calculatePacketAirtime(respPkt.payloadLen + respPkt.pathLen + 2);
+    uint32_t airtime = calculatePacketAirtime(respPkt.getTotalSize());
     uint8_t score = calcSnrScore(pkt->snr);
     uint32_t rxDel = calcRxDelay(score, airtime);
     uint32_t randomDelay = rxDel + calcTxJitter(airtime);
@@ -323,7 +341,7 @@ bool processTxtMsgCLI(MCPacket* pkt) {
 
     uint8_t decrypted[128];
     uint16_t decryptedLen = meshCrypto.MACThenDecrypt(
-        decrypted, encrypted, encryptedLen,
+        decrypted, sizeof(decrypted), encrypted, encryptedLen,
         session->sharedSecret, session->sharedSecret);
 
     if (decryptedLen == 0) {
@@ -489,7 +507,7 @@ bool processAuthenticatedRequest(MCPacket* pkt) {
 
     uint8_t decrypted[128];
     uint16_t decryptedLen = meshCrypto.MACThenDecrypt(
-        decrypted, encrypted, encryptedLen,
+        decrypted, sizeof(decrypted), encrypted, encryptedLen,
         session->sharedSecret, session->sharedSecret);
 
     if (decryptedLen == 0) {
@@ -758,6 +776,16 @@ bool processAnonRequest(MCPacket* pkt) {
         return false;
     }
 
+    // Refuse remote admin login with the factory password: anyone knows it.
+    // It must be changed from the serial console first ('password admin <pw>').
+    if (strcmp(sessionManager.getAdminPassword(), MC_DEFAULT_ADMIN_PASSWORD) == 0 &&
+        strcmp(password, MC_DEFAULT_ADMIN_PASSWORD) == 0) {
+        memset(password, 0, sizeof(password));
+        statsRecordLoginFail();
+        LOG(TAG_AUTH " Login refused: default admin password\n\r");
+        return false;
+    }
+
     // Process login through session manager
     uint8_t permissions = sessionManager.processLogin(
         ephemeralPub,  // Use ephemeral key as client identifier
@@ -897,13 +925,26 @@ void processReceivedPacket(MCPacket* pkt) {
             processDiscoverRequest(pkt);
         }
     }
-    // Handle TRACE (ping) - add our SNR and forward
+    // Handle TRACE (MeshCore): DIRECT packet whose payload is
+    // [tag:4][auth:4][flags:1][hop hashes...]; flags & 3 = log2(hash size).
+    // path[] holds one SNR byte per hop already traversed. Only the node
+    // matching the next hop hash appends its SNR and forwards, once.
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_PATH_TRACE) {
-        // Add our SNR to the path (SNR * 4 as signed byte)
-        if (pkt->pathLen < MC_MAX_PATH_SIZE) {
-            pkt->path[pkt->pathLen++] = (int8_t)(pkt->snr);
-            // Forward the trace packet
-            txQueue.add(pkt);
+        if (pkt->header.isDirect() && pkt->payloadLen >= 9 &&
+            pkt->pathLen < MC_MAX_PATH_SIZE && repeaterHelper.isRepeatEnabled()) {
+            uint8_t pathSz = pkt->payload[8] & 0x03;
+            uint8_t hashLen = 1 << pathSz;
+            uint16_t offset = (uint16_t)pkt->pathLen << pathSz;
+            uint16_t hopsLen = pkt->payloadLen - 9;
+            if (offset + hashLen <= hopsLen &&
+                isSelfHash(&pkt->payload[9 + offset], hashLen) &&
+                packetCache.addIfNew(getPacketId(pkt))) {
+                pkt->path[pkt->pathLen++] = (int8_t)(pkt->snr);
+                txQueue.add(pkt);
+                fwdCount++;
+                statsRecordFwd();
+                LOG(TAG_FWD " Trace hop %d\n\r", pkt->pathLen);
+            }
         }
     }
     // Parse and display ADVERT info
@@ -976,10 +1017,10 @@ void processReceivedPacket(MCPacket* pkt) {
             // Add to contact manager (stores full public key for messaging)
             // Filter by hop count if autoAddMaxHops is set (0 = no limit)
             const uint8_t* pubKey = &pkt->payload[ADVERT_PUBKEY_OFFSET];
-            if (autoAddMaxHops == 0 || pkt->pathLen <= autoAddMaxHops) {
+            if (autoAddMaxHops == 0 || pkt->pathHashCount() <= autoAddMaxHops) {
                 contactMgr.updateFromAdvert(pubKey, advInfo.name, pkt->rssi, pkt->snr);
             } else {
-                LOG(TAG_INFO " Skip contact (hops=%d > max=%d)\n\r", pkt->pathLen, autoAddMaxHops);
+                LOG(TAG_INFO " Skip contact (hops=%d > max=%d)\n\r", pkt->pathHashCount(), autoAddMaxHops);
             }
 
             // Store-and-forward: deliver pending messages for this node
@@ -993,7 +1034,7 @@ void processReceivedPacket(MCPacket* pkt) {
 
             // If this is a repeater AND received directly (0-hop), add to neighbours list
             // Only 0-hop ADVERTs indicate direct neighbours (no relay)
-            if (advInfo.isRepeater && pkt->pathLen == 0 && pkt->payloadLen >= 32) {
+            if (advInfo.isRepeater && pkt->pathHashCount() == 0 && pkt->payloadLen >= 32) {
                 bool newNeighbour = repeaterHelper.getNeighbours().update(
                     pkt->payload,  // First 32 bytes are pubkey
                     pkt->snr, pkt->rssi);
@@ -1004,16 +1045,16 @@ void processReceivedPacket(MCPacket* pkt) {
         }
     }
     // Track nodes - either from path or from payload hash for direct packets
-    else if (pkt->pathLen > 0) {
-        // First byte is originator
+    else if (pkt->pathHashCount() > 0 && pkt->header.getPayloadType() != MC_PAYLOAD_PATH_TRACE) {
+        // First byte is originator (first byte of its pubkey, any hash size)
         bool isNew = seenNodes.update(pkt->path[0], pkt->rssi, pkt->snr);
         if (isNew) {
             statsRecordUniqueNode();  // Persistent stats
             LOG(TAG_NODE " New %02X\n\r", pkt->path[0]);
         }
         // If path has multiple hops, also track the last hop (direct neighbor)
-        if (pkt->pathLen > 1) {
-            uint8_t lastHop = pkt->path[pkt->pathLen - 1];
+        if (pkt->pathHashCount() > 1) {
+            uint8_t lastHop = pkt->path[(pkt->pathHashCount() - 1) * pkt->pathHashSize()];
             if (lastHop != pkt->path[0]) {
                 seenNodes.update(lastHop, pkt->rssi, pkt->snr);
             }
@@ -1070,30 +1111,33 @@ void processReceivedPacket(MCPacket* pkt) {
             LOG(TAG_FWD " Rate lim\n\r");
         } else {
             if (pkt->header.isDirect()) {
-                // Circuit breaker: check next hop before peel
-                if (pkt->pathLen >= 2) {
-                    uint8_t nextHop = pkt->path[1];
+                uint8_t hashSize = pkt->pathHashSize();
+                uint8_t hops = pkt->pathHashCount();
+                // Circuit breaker: check next hop before peel (neighbours keyed by 1st byte)
+                if (hops >= 2) {
+                    uint8_t nextHop = pkt->path[hashSize];
                     if (repeaterHelper.getNeighbours().isCircuitOpen(nextHop)) {
                         LOG(TAG_FWD " CB %02X\n\r", nextHop);
                         goto skipForward;
                     }
                 }
-                // DIRECT routing: remove ourselves from path[0] (peel)
-                pkt->pathLen--;
-                for (uint8_t i = 0; i < pkt->pathLen; i++) {
-                    pkt->path[i] = pkt->path[i + 1];
-                }
-                LOG(TAG_FWD " Direct p=%d\n\r", pkt->pathLen);
+                // DIRECT routing: remove ourselves (first entry) from the path
+                pkt->setPathHashCount(hops - 1);
+                memmove(pkt->path, &pkt->path[hashSize], (hops - 1) * hashSize);
+                LOG(TAG_FWD " Direct p=%d\n\r", pkt->pathHashCount());
             } else {
-                // FLOOD routing: add our hash to path
-                pkt->path[pkt->pathLen++] = nodeIdentity.getNodeHash();
+                // FLOOD routing: append our hash using the originator's hash size
+                uint8_t hashSize = pkt->pathHashSize();
+                uint8_t hops = pkt->pathHashCount();
+                memcpy(&pkt->path[hops * hashSize], nodeIdentity.getPublicKey(), hashSize);
+                pkt->setPathHashCount(hops + 1);
             }
 
             // Add to TX queue
             txQueue.add(pkt);
             fwdCount++;
             statsRecordFwd();  // Persistent stats
-            LOG(TAG_FWD " Q p=%d\n\r", pkt->pathLen);
+            LOG(TAG_FWD " Q p=%d\n\r", pkt->pathHashCount());
         }
         skipForward:;
     }

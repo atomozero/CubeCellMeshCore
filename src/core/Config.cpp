@@ -22,7 +22,7 @@ const NodeConfig defaultConfig = {
     1,      // powerSaveMode = balanced
     false,  // rxBoostEnabled
     true,   // deepSleepEnabled
-    "admin",  // Default admin password
+    MC_DEFAULT_ADMIN_PASSWORD,  // Default admin password
     "guest",  // Default guest password
     false,  // reportEnabled
     8,      // reportHour (08:00)

@@ -320,9 +320,11 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
         CP("RSSI:%d SNR:%d.%02ddB\n", lastRssi, lastSnr/4, abs(lastSnr%4)*25);
     }
     else if (strcmp(cmd, "acl") == 0) {
+        // Passwords only for admins (guests can run read-only commands remotely)
+        const char* guestPwd = sessionManager.getGuestPassword();
         CP("Admin:%s Guest:%s S:%d\n",
-            sessionManager.getAdminPassword(),
-            strlen(sessionManager.getGuestPassword()) > 0 ? sessionManager.getGuestPassword() : "(off)",
+            isAdmin ? sessionManager.getAdminPassword() : "***",
+            strlen(guestPwd) == 0 ? "(off)" : (isAdmin ? guestPwd : "***"),
             sessionManager.getSessionCount());
     }
     else if (strcmp(cmd, "quiet") == 0) {

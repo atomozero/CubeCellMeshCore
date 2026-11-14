@@ -10,7 +10,7 @@
 // Maximum sizes
 #define MC_MAX_PACKET_SIZE      255
 #define MC_MAX_PATH_SIZE        64
-#define MC_MAX_PAYLOAD_SIZE     180
+#define MC_MAX_PAYLOAD_SIZE     184     // MeshCore MAX_PACKET_PAYLOAD
 
 // Header bit masks and shifts
 #define MC_HEADER_ROUTE_MASK    0x03
@@ -111,7 +111,7 @@ struct MCPacketHeader {
 struct MCPacket {
     MCPacketHeader header;
     uint16_t transport_codes[2];    // Region transport codes (4 bytes on wire)
-    uint8_t pathLen;
+    uint8_t pathLen;                // Raw wire byte: bits 0-5 hop count, bits 6-7 hash size - 1
     uint8_t payloadLen;
     uint8_t path[MC_MAX_PATH_SIZE];
     uint8_t payload[MC_MAX_PAYLOAD_SIZE];
@@ -127,11 +127,25 @@ struct MCPacket {
         return (rt == MC_ROUTE_TRANSPORT_FLOOD || rt == MC_ROUTE_TRANSPORT_DIRECT);
     }
 
+    // --- Path encoding (MeshCore multi-byte path hashes) ---
+    // path_len byte: low 6 bits = number of hops, high 2 bits = (hash size - 1).
+    // 0x42 = 2 hops of 2-byte hashes = 4 path bytes. Hash size 4 is reserved.
+    // TRACE packets store one SNR byte per hop here (high bits always 0).
+    static inline uint8_t pathHashSizeOf(uint8_t raw) { return (raw >> 6) + 1; }
+    static inline uint8_t pathByteLenOf(uint8_t raw) { return (raw & 63) * ((raw >> 6) + 1); }
+    static inline bool isValidPathLen(uint8_t raw) {
+        return pathHashSizeOf(raw) != 4 && pathByteLenOf(raw) <= MC_MAX_PATH_SIZE;
+    }
+    inline uint8_t pathHashSize() const { return pathHashSizeOf(pathLen); }
+    inline uint8_t pathHashCount() const { return pathLen & 63; }
+    inline uint8_t pathByteLen() const { return pathByteLenOf(pathLen); }
+    inline void setPathHashCount(uint8_t n) { pathLen = (pathLen & 0xC0) | (n & 63); }
+
     // Calculate total packet size for TX
     // Wire format with transport codes:    [header 1B][tc 4B][pathLen 1B][path...][payload...]
     // Wire format without transport codes: [header 1B][pathLen 1B][path...][payload...]
     inline uint16_t getTotalSize() const {
-        return 1 + (hasTransportCodes() ? 4 : 0) + 1 + pathLen + payloadLen;
+        return 1 + (hasTransportCodes() ? 4 : 0) + 1 + pathByteLen() + payloadLen;
     }
 
     // Serialize packet to buffer for transmission
@@ -148,9 +162,10 @@ struct MCPacket {
 
         buf[pos++] = pathLen;
 
-        if (pathLen > 0) {
-            memcpy(&buf[pos], path, pathLen);
-            pos += pathLen;
+        uint8_t pathBytes = pathByteLen();
+        if (pathBytes > 0) {
+            memcpy(&buf[pos], path, pathBytes);
+            pos += pathBytes;
         }
 
         if (payloadLen > 0) {
@@ -181,21 +196,21 @@ struct MCPacket {
         if (pos >= len) return false;
         pathLen = buf[pos++];
 
-        // Validate pathLen
-        if (pathLen > MC_MAX_PATH_SIZE) return false;
-        if (pos + pathLen > len) return false;
+        // Validate encoded path length (hop count x hash size <= 64 bytes)
+        if (!isValidPathLen(pathLen)) return false;
+        uint8_t pathBytes = pathByteLen();
+        if (pos + pathBytes > len) return false;
 
         // Copy path data
-        if (pathLen > 0) {
-            memcpy(path, &buf[pos], pathLen);
-            pos += pathLen;
+        if (pathBytes > 0) {
+            memcpy(path, &buf[pos], pathBytes);
+            pos += pathBytes;
         }
 
-        // Payload is everything remaining
+        // Payload is everything remaining (reject oversize instead of truncating:
+        // a truncated packet would be forwarded corrupted)
         uint16_t availablePayload = len - pos;
-        if (availablePayload > MC_MAX_PAYLOAD_SIZE) {
-            availablePayload = MC_MAX_PAYLOAD_SIZE;
-        }
+        if (availablePayload > MC_MAX_PAYLOAD_SIZE) return false;
         payloadLen = availablePayload;
 
         if (payloadLen > 0) {

@@ -22,6 +22,9 @@
 #ifndef EEPROM_VERSION
 #define EEPROM_VERSION      6
 #endif
+// Factory admin password: remote admin login is refused while it is in use
+#define MC_DEFAULT_ADMIN_PASSWORD  "admin"
+
 #ifndef CONFIG_PASSWORD_LEN
 #define CONFIG_PASSWORD_LEN 16
 #endif

@@ -4,6 +4,7 @@
 #include <SHA256.h>
 #include <RNG.h>
 #include "Identity.h"
+#include "Packet.h"
 #include "ed25519_orlp.h"  // orlp/ed25519 for key exchange
 
 /**
@@ -195,13 +196,19 @@ public:
      * @param macKey MAC key (full 32-byte shared secret)
      * @return Decrypted length, 0 if MAC failed
      */
-    uint16_t MACThenDecrypt(uint8_t* output, const uint8_t* input, uint16_t len,
+    uint16_t MACThenDecrypt(uint8_t* output, uint16_t outMax, const uint8_t* input, uint16_t len,
                             const uint8_t* key, const uint8_t* macKey) {
         if (len < MC_CIPHER_MAC_SIZE + MC_AES_BLOCK_SIZE) {
             return 0;  // Too short
         }
 
         uint16_t cipherLen = len - MC_CIPHER_MAC_SIZE;
+        // Ciphertext must be whole AES blocks and fit the output buffer.
+        // (A MAC can be forged-valid by anyone for ANON_REQ, since the key comes
+        // from the sender's ephemeral key: never trust the length.)
+        if ((cipherLen % MC_AES_BLOCK_SIZE) != 0 || cipherLen > outMax) {
+            return 0;
+        }
         const uint8_t* mac = input;
         const uint8_t* ciphertext = &input[MC_CIPHER_MAC_SIZE];
 
@@ -264,7 +271,7 @@ public:
         }
 
         uint8_t decrypted[128];
-        uint16_t decryptedLen = MACThenDecrypt(decrypted, encrypted, encryptedLen,
+        uint16_t decryptedLen = MACThenDecrypt(decrypted, sizeof(decrypted), encrypted, encryptedLen,
                                                 secret, secret);
         memset(secret, 0, MC_SHARED_SECRET_SIZE);
 
@@ -493,10 +500,12 @@ public:
         s->lastActivity = millis();
         s->active = true;
 
-        // Store return path
-        s->outPathLen = (outPathLen > 8) ? 8 : outPathLen;
+        // Store return path (outPathLen is the encoded path_len byte; keep it
+        // only if the whole path fits, a truncated path would be unusable)
+        uint8_t pathBytes = MCPacket::pathByteLenOf(outPathLen);
+        s->outPathLen = (pathBytes <= sizeof(s->outPath)) ? outPathLen : 0;
         if (s->outPathLen > 0) {
-            memcpy(s->outPath, outPath, s->outPathLen);
+            memcpy(s->outPath, outPath, pathBytes);
         }
 
         return permissions;
