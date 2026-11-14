@@ -1,5 +1,7 @@
 # CubeCellMeshCore v0.5 - Roadmap Feature Analysis
 
+> **Documento storico.** Le cifre di Flash/RAM e i flag citati (es. `ENABLE_DAILY_REPORT`, PacketLogger) si riferiscono a versioni precedenti al refactoring del 2026-11. Stato attuale in [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Stato risorse hardware (HTCC-AB01)
 
 ### Flash (131,072 bytes totali)

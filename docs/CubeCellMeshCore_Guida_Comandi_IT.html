@@ -693,19 +693,7 @@ save
 <!-- =================== 10. REPORT =================== -->
 <h2 class="break-before">10. Report Giornaliero</h2>
 
-<table>
-  <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
-  <tbody>
-    <tr><td><code>report</code></td><td>Stato report (on/off, orario, destinazione)</td></tr>
-    <tr><td><code>report on</code></td><td>Abilita report giornaliero</td></tr>
-    <tr><td><code>report off</code></td><td>Disabilita report giornaliero</td></tr>
-    <tr><td><code>report test</code></td><td>Invia report di test immediatamente</td></tr>
-    <tr><td><code>report nodes</code></td><td>Invia report nodi immediatamente</td></tr>
-    <tr><td><code>report time HH:MM</code></td><td>Imposta orario invio (formato 24h)</td></tr>
-    <tr><td><code>report dest &lt;nome&gt;</code></td><td>Imposta destinazione (per nome contatto)</td></tr>
-    <tr><td><code>report clear</code></td><td>Cancella destinazione e disabilita</td></tr>
-  </tbody>
-</table>
+<p><em>Funzione rimossa dal firmware: i comandi <code>report</code> non sono più disponibili.</em></p>
 
 <!-- =================== 11. QUIET/CB =================== -->
 <h2>11. Quiet Hours e Circuit Breaker</h2>
@@ -797,7 +785,6 @@ save
     <tr><td><code>tempradio ...</code></td><td>Parametri radio temporanei</td></tr>
     <tr><td><code>set radio ...</code></td><td>Imposta parametri radio</td></tr>
     <tr><td><code>set freq &lt;MHz&gt;</code></td><td>Imposta solo frequenza</td></tr>
-    <tr><td><code>log start|stop|erase</code></td><td>Controllo packet log</td></tr>
     <tr><td><code>alert test</code></td><td>Invia alert di test</td></tr>
     <tr><td><code>msg &lt;nome&gt; &lt;messaggio&gt;</code></td><td>Invia messaggio diretto a un contatto</td></tr>
   </tbody>
@@ -832,7 +819,7 @@ password &lt;pwd&gt; &nbsp; set guest.password &lt;pwd&gt; &nbsp; powersaving on
 mode 0/1/2 &nbsp; sleep on/off &nbsp; rxboost on/off &nbsp; advert &nbsp; ping &nbsp; trace<br>
 alert on/off/dest/clear &nbsp; mailbox clear &nbsp; quiet &lt;S&gt; &lt;E&gt; &nbsp; quiet off<br>
 ratelimit on/off/reset &nbsp; clear stats &nbsp; neighbor.remove &lt;hex&gt;<br>
-report on/off/dest/time/test/nodes &nbsp; save &nbsp; erase &nbsp; reboot &nbsp; clkreboot
+save &nbsp; erase &nbsp; reboot &nbsp; clkreboot
 </div>
 
 <!-- =================== 17. PROFILI =================== -->

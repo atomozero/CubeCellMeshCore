@@ -2,6 +2,7 @@
 #include "sha512.h"
 #include "ge.h"
 #include "sc.h"
+#include <string.h>
 
 int ed25519_verify(const unsigned char *signature, const unsigned char *message, size_t message_len, const unsigned char *public_key) {
     unsigned char h[64];

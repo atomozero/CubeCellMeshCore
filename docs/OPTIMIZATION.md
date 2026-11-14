@@ -1,5 +1,7 @@
 # CubeCellMeshCore Memory Optimization Guide
 
+> **Documento storico.** Le cifre di Flash/RAM e i flag citati (es. `ENABLE_DAILY_REPORT`, PacketLogger) si riferiscono a versioni precedenti al refactoring del 2026-11. Stato attuale in [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Current Status (After Optimizations)
 - **Flash**: ~130,816 / 131,072 bytes (99.8%)
 - **RAM**: ~8,704 / 16,384 bytes (53.1%)

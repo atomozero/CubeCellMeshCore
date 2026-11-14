@@ -26,12 +26,12 @@ echo "RAM: $RAM_USAGE"
 FLASH_PCT=$(echo $FLASH_USAGE | tr -d '%')
 RAM_PCT=$(echo $RAM_USAGE | tr -d '%')
 
-if (( $(echo "$FLASH_PCT > 100" | bc -l) )); then
+if awk -v v="$FLASH_PCT" 'BEGIN{exit !(v > 100)}'; then
     echo "[FAIL] Flash usage exceeds 100%!"
     exit 1
 fi
 
-if (( $(echo "$RAM_PCT > 80" | bc -l) )); then
+if awk -v v="$RAM_PCT" 'BEGIN{exit !(v > 80)}'; then
     echo "[WARN] RAM usage above 80%"
 fi
 
