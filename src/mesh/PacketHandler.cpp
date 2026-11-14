@@ -1,3 +1,59 @@
+#include "../main.h"
+#include "../core/Led.h"
+#include "../core/Config.h"
+
+// Replies to directed ping / trace requests (used only by packet processing)
+static void sendPong(uint8_t targetHash, MCPacket* rxPkt) {
+    MCPacket pkt;
+    pkt.clear();
+    pkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1);
+
+    uint8_t myHash = nodeIdentity.getNodeHash();
+    pkt.path[0] = myHash;
+    pkt.pathLen = 1;
+
+    // Payload: [destHash][srcHash]['P']['O'][text: "name rssi"]
+    pkt.payload[0] = targetHash;
+    pkt.payload[1] = myHash;
+    pkt.payload[2] = 'P';
+    pkt.payload[3] = 'O';
+    pkt.payloadLen = 4 + snprintf((char*)&pkt.payload[4], MC_MAX_PAYLOAD_SIZE - 4,
+                                   "%s %d", nodeIdentity.getNodeName(), rxPkt->rssi);
+
+    LOG(TAG_PING " PONG -> %02X\n\r", targetHash);
+
+    uint32_t id = getPacketId(&pkt);
+    packetCache.addIfNew(id);
+    txQueue.add(&pkt);
+    txCount++;
+}
+
+static void sendTraceResponse(uint8_t targetHash, MCPacket* rxPkt) {
+    MCPacket pkt;
+    pkt.clear();
+    pkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1);
+
+    uint8_t myHash = nodeIdentity.getNodeHash();
+    pkt.path[0] = myHash;
+    pkt.pathLen = 1;
+
+    // Payload: [destHash][srcHash]['T']['R'][text: "name rssi hops"]
+    pkt.payload[0] = targetHash;
+    pkt.payload[1] = myHash;
+    pkt.payload[2] = 'T';
+    pkt.payload[3] = 'R';
+    pkt.payloadLen = 4 + snprintf((char*)&pkt.payload[4], MC_MAX_PAYLOAD_SIZE - 4,
+                                   "%s %d %d", nodeIdentity.getNodeName(), rxPkt->rssi, rxPkt->pathLen);
+
+    LOG(TAG_PING " TR -> %02X\n\r", targetHash);
+
+    uint32_t id = getPacketId(&pkt);
+    packetCache.addIfNew(id);
+    txQueue.add(&pkt);
+    txCount++;
+}
+
+
 //=============================================================================
 // Packet Processing
 //=============================================================================

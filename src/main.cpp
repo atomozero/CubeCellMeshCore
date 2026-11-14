@@ -9,92 +9,11 @@
 #include "core/Led.h"
 #include "core/Config.h"
 
-//=============================================================================
-// Forward declarations
-//=============================================================================
-#ifndef LITE_MODE
-void sendDirectMessage(const char* recipientName, const char* message);
+#ifdef CUBECELL
+#include "cyPm.c"      // framework power-mode source, compiled once here
+#include "innerWdt.h"
 #endif
-bool transmitPacket(MCPacket* pkt);
-void startReceive();
-bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int16_t rssi);
-bool sendAlertAsChatNode(const char* text);
-uint32_t getPacketId(MCPacket* pkt);
 
-// Health monitor thresholds
-#define HEALTH_OFFLINE_MS       1800000  // 30 minutes
-#define HEALTH_SNR_DROP_THRESH  24       // 6dB drop in SNR*4 units
-
-// Helper: check if a pubkey buffer is non-zero
-static inline bool isPubKeySet(const uint8_t* key) {
-    for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
-        if (key[i] != 0) return true;
-    }
-    return false;
-}
-
-// Parse decimal string to fixed-point int32 with 6 decimal places
-// "45.123456" -> 45123456, "-12.5" -> -12500000
-// Returns true on success
-static bool parseFixed6(const char* s, int32_t* out) {
-    if (!s || !*s) return false;
-    bool neg = false;
-    if (*s == '-') { neg = true; s++; }
-    int32_t whole = 0;
-    while (*s >= '0' && *s <= '9') { whole = whole * 10 + (*s - '0'); s++; }
-    int32_t frac = 0;
-    if (*s == '.') {
-        s++;
-        int32_t mul = 100000;
-        for (int i = 0; i < 6 && *s >= '0' && *s <= '9'; i++) {
-            frac += (*s - '0') * mul;
-            mul /= 10;
-            s++;
-        }
-    }
-    *out = (whole * 1000000 + frac) * (neg ? -1 : 1);
-    return true;
-}
-
-// Parse decimal string to uint32 with 3 decimal places (for MHz)
-// "869.618" -> 869618
-static bool parseMHz3(const char* s, uint32_t* out) {
-    if (!s || !*s) return false;
-    uint32_t whole = 0;
-    while (*s >= '0' && *s <= '9') { whole = whole * 10 + (*s - '0'); s++; }
-    uint32_t frac = 0;
-    if (*s == '.') {
-        s++;
-        uint32_t mul = 100;
-        for (int i = 0; i < 3 && *s >= '0' && *s <= '9'; i++) {
-            frac += (*s - '0') * mul;
-            mul /= 10;
-            s++;
-        }
-    }
-    *out = whole * 1000 + frac;
-    return true;
-}
-
-// Parse decimal string to uint32 with 1 decimal place (for kHz bandwidth)
-// "62.5" -> 625
-static bool parseBW1(const char* s, uint32_t* out) {
-    if (!s || !*s) return false;
-    uint32_t whole = 0;
-    while (*s >= '0' && *s <= '9') { whole = whole * 10 + (*s - '0'); s++; }
-    uint32_t frac = 0;
-    if (*s == '.') {
-        s++;
-        if (*s >= '0' && *s <= '9') frac = *s - '0';
-    }
-    *out = whole * 10 + frac;
-    return true;
-}
-
-#include "cli/Commands.inc"
-#include "radio/Radio.inc"
-#include "mesh/Messaging.inc"
-#include "mesh/PacketHandler.inc"
 //=============================================================================
 // Main Setup & Loop
 //=============================================================================

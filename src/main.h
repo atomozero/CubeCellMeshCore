@@ -240,8 +240,9 @@ using std::max;
 using std::min;
 #endif
 
-#include "cyPm.c"
-#include "innerWdt.h"
+// cyPm.c / innerWdt.h contain function definitions: included only by main.cpp
+#include "cyPm.h"
+void feedInnerWdt();   // defined in framework innerWdt.h (included by main.cpp)
 extern uint32_t systime;
 
 #endif // CUBECELL
@@ -336,6 +337,34 @@ uint32_t getPacketId(MCPacket* pkt);
 // ADVERT
 void sendAdvert(bool flood = true);
 void checkAdvertBeacon();
+
+// Health monitor thresholds
+#define HEALTH_OFFLINE_MS       1800000  // 30 minutes
+#define HEALTH_SNR_DROP_THRESH  24       // 6dB drop in SNR*4 units
+
+// Helper: check if a pubkey buffer is non-zero
+static inline bool isPubKeySet(const uint8_t* key) {
+    for (uint8_t i = 0; i < REPORT_PUBKEY_SIZE; i++) {
+        if (key[i] != 0) return true;
+    }
+    return false;
+}
+
+// Messaging (mesh/Messaging.cpp)
+#ifndef LITE_MODE
+void sendDirectMessage(const char* recipientName, const char* message);
+#endif
+bool sendEncryptedToAdmin(const uint8_t* destPubKey, const char* text, uint16_t textLen);
+bool sendNodeAlert(const char* nodeName, uint8_t nodeHash, uint8_t nodeType, int16_t rssi);
+bool sendAlertAsChatNode(const char* text);
+void healthCheck();
+
+// Packet handling (mesh/PacketHandler.cpp)
+bool processDiscoverRequest(MCPacket* pkt);
+bool processAuthenticatedRequest(MCPacket* pkt);
+
+// CLI (cli/Commands.cpp)
+uint16_t processRemoteCommand(const char* cmd, char* response, uint16_t maxLen, bool isAdmin);
 
 // Authentication
 bool processAnonRequest(MCPacket* pkt);

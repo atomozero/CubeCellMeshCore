@@ -1,3 +1,8 @@
+#include "../main.h"
+#include "../core/Led.h"
+#include "../core/Config.h"
+
+
 //=============================================================================
 // Ping / Test Packet
 //=============================================================================
@@ -67,31 +72,6 @@ void sendDirectedPing(uint8_t targetHash) {
     startReceive();
 }
 
-static void sendPong(uint8_t targetHash, MCPacket* rxPkt) {
-    MCPacket pkt;
-    pkt.clear();
-    pkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1);
-
-    uint8_t myHash = nodeIdentity.getNodeHash();
-    pkt.path[0] = myHash;
-    pkt.pathLen = 1;
-
-    // Payload: [destHash][srcHash]['P']['O'][text: "name rssi"]
-    pkt.payload[0] = targetHash;
-    pkt.payload[1] = myHash;
-    pkt.payload[2] = 'P';
-    pkt.payload[3] = 'O';
-    pkt.payloadLen = 4 + snprintf((char*)&pkt.payload[4], MC_MAX_PAYLOAD_SIZE - 4,
-                                   "%s %d", nodeIdentity.getNodeName(), rxPkt->rssi);
-
-    LOG(TAG_PING " PONG -> %02X\n\r", targetHash);
-
-    uint32_t id = getPacketId(&pkt);
-    packetCache.addIfNew(id);
-    txQueue.add(&pkt);
-    txCount++;
-}
-
 void sendDirectedTrace(uint8_t targetHash) {
     MCPacket pkt;
     pkt.clear();
@@ -121,31 +101,6 @@ void sendDirectedTrace(uint8_t targetHash) {
         LOG(TAG_PING " TX fail\n\r");
     }
     startReceive();
-}
-
-static void sendTraceResponse(uint8_t targetHash, MCPacket* rxPkt) {
-    MCPacket pkt;
-    pkt.clear();
-    pkt.header.set(MC_ROUTE_FLOOD, MC_PAYLOAD_PLAIN, MC_PAYLOAD_VER_1);
-
-    uint8_t myHash = nodeIdentity.getNodeHash();
-    pkt.path[0] = myHash;
-    pkt.pathLen = 1;
-
-    // Payload: [destHash][srcHash]['T']['R'][text: "name rssi hops"]
-    pkt.payload[0] = targetHash;
-    pkt.payload[1] = myHash;
-    pkt.payload[2] = 'T';
-    pkt.payload[3] = 'R';
-    pkt.payloadLen = 4 + snprintf((char*)&pkt.payload[4], MC_MAX_PAYLOAD_SIZE - 4,
-                                   "%s %d %d", nodeIdentity.getNodeName(), rxPkt->rssi, rxPkt->pathLen);
-
-    LOG(TAG_PING " TR -> %02X\n\r", targetHash);
-
-    uint32_t id = getPacketId(&pkt);
-    packetCache.addIfNew(id);
-    txQueue.add(&pkt);
-    txCount++;
 }
 
 //=============================================================================
@@ -294,12 +249,12 @@ void sendDirectMessage(const char* recipientName, const char* message) {
 #endif // LITE_MODE
 
 //=============================================================================
-// Daily Report - Send encrypted status message to admin
+// Encrypted messages to admin (node alerts)
 //=============================================================================
 
 /**
  * Send encrypted text message to a destination public key
- * Used by node alerts (and daily report if enabled)
+ * Used by node alerts
  */
 bool sendEncryptedToAdmin(const uint8_t* destPubKey, const char* text, uint16_t textLen) {
     if (!isPubKeySet(destPubKey) || !timeSync.isSynchronized()) return false;
