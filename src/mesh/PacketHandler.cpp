@@ -954,6 +954,13 @@ void processReceivedPacket(MCPacket* pkt) {
             }
         }
     }
+    // Our own ADVERT repeated back by a neighbour: don't learn ourselves as a
+    // node/contact and don't take time sync from our own clock.
+    else if (pkt->header.getPayloadType() == MC_PAYLOAD_ADVERT &&
+             pkt->payloadLen >= ADVERT_PUBKEY_OFFSET + 32 &&
+             isSelfHash(&pkt->payload[ADVERT_PUBKEY_OFFSET], 32)) {
+        LOG(TAG_INFO " Own ADV echo\n\r");
+    }
     // Parse and display ADVERT info
     else if (pkt->header.getPayloadType() == MC_PAYLOAD_ADVERT) {
         advRxCount++;
