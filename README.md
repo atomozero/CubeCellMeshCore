@@ -216,7 +216,7 @@ MIT License - See LICENSE file for details.
   - Automatic duplicate detection based on packet ID hash
   - Reduces network congestion and prevents loops
 - **Test Suite** - New verification script `tools/test_adaptive_tx.py`
-- See [FEATURES_ADDED.md](FEATURES_ADDED.md) for detailed documentation
+- See [FEATURES_ADDED.md](docs/FEATURES_ADDED.md) for detailed documentation
 
 ### v0.6.0 (2026-03-06)
 - **Loop Detection System** - MeshCore 1.14 compatible configurable loop detection

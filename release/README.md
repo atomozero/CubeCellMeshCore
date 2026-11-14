@@ -19,7 +19,7 @@ MeshCore-compatible repeater firmware for Heltec CubeCell HTCC-AB01.
   - Prevents duplicate packet forwarding automatically
   - Reduces network congestion and prevents loops
 - **Test Suite** - New verification script `tools/test_adaptive_tx.py`
-- See [FEATURES_ADDED.md](../FEATURES_ADDED.md) for detailed documentation
+- See [FEATURES_ADDED.md](../docs/FEATURES_ADDED.md) for detailed documentation
 
 ## Previous Features (v0.5.0-v0.6.0)
 

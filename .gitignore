@@ -40,3 +40,4 @@ __pycache__/
 # Temporary/debug
 battdebug.py
 PROMPT_SIMULATOR.md
+.pytest_cache/

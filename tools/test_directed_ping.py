@@ -4,7 +4,7 @@ Test suite for directed ping/pong and trace features.
 Validates payload format, routing logic, and CLI parsing
 without requiring hardware.
 
-Run: python3 test_directed_ping.py
+Run: python3 tools/test_directed_ping.py
 """
 
 import struct
