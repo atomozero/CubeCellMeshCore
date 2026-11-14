@@ -292,7 +292,7 @@ These commands are only available via USB serial console, not remotely:
 | `set radio ...` | Set radio parameters |
 | `set freq <MHz>` | Set frequency only |
 | `alert test` | Send test alert |
-| `msg <name> <message>` | Send direct message to contact (only in builds without `LITE_MODE`) |
+| `msg <name> <message>` | Send direct message to contact (disabled if `LITE_MODE` is defined) |
 
 ## Remote Configuration (via MeshCore app)
 

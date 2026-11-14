@@ -11,7 +11,7 @@ PROJECT_DIR="$(dirname "$0")/.."
 cd "$PROJECT_DIR"
 
 # Test 1: Standard build
-echo "[TEST 1] Standard build (LITE_MODE)"
+echo "[TEST 1] Standard build"
 pio run 2>&1 | tail -5
 echo ""
 

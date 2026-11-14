@@ -15,7 +15,7 @@
 //=============================================================================
 
 //#define SILENT                  // Disable ALL serial output
-#define LITE_MODE                 // Remove non-essential features for space saving
+//#define LITE_MODE               // Remove non-essential features (direct messages) for space saving
 
 // Node identity - set to 0 to auto-generate from chip ID
 #define MC_NODE_ID          0

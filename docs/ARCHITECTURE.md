@@ -165,7 +165,7 @@ Key hardware constraints:
 ## Memory Layout
 
 ### Flash (128 KB total)
-- Firmware code: ~114 KB (87.0%), ~17 KB free
+- Firmware code: ~115 KB (87.9%), ~16 KB free
 - Ed25519 compact implementation saves ~97KB vs standard tables
 
 ### RAM (16 KB total)
