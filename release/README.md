@@ -1,28 +1,26 @@
-# CubeCellMeshCore v0.7.0
+# CubeCellMeshCore v0.8.0
 
 MeshCore-compatible repeater firmware for Heltec CubeCell HTCC-AB01.
 
-## What's New in v0.7.0
+## What's New in v0.8.0
 
-- **Enhanced Link Quality Statistics** - RSSI/SNR exponential moving averages (EMA) per neighbour
-  - New metrics: `rssiAvg`, `snrAvg`, `pktCount`, `pktCountWindow`
-  - 60-second measurement windows for packet rate tracking
-  - Updated `neighbours` command shows current and average values
-  - Enables link degradation detection and intelligent routing decisions
-- **Adaptive TX Power** - Fully documented automatic power adjustment system
-  - Evaluates every 60 seconds based on average neighbour SNR
-  - SNR > +10dB → Reduces power by 2 dBm (energy saving)
-  - SNR < -5dB → Increases power by 2 dBm (better coverage)
-  - Range: 5-21 dBm with 2 dBm steps
-  - Commands: `set tx auto on/off`, `txpower auto on/off`, `txpower <5-21>`
-- **Packet Deduplication** - Documented existing 32-slot ring buffer cache
-  - Prevents duplicate packet forwarding automatically
-  - Reduces network congestion and prevents loops
-- **Test Suite** - New verification script `tools/test_adaptive_tx.py`
-- See [FEATURES_ADDED.md](../docs/FEATURES_ADDED.md) for detailed documentation
+- **No more lost traffic** - Packets whose path uses 2- or 3-byte hashes (MeshCore 1.11+) were dropped as `Bad pkt`; they are now parsed, deduplicated and forwarded correctly. Verified on air with 2-byte and 3-byte paths up to 9 hops
+- **TRACE packets** forwarded as MeshCore does (direct only, SNR appended per hop)
+- **Deduplication** now matches MeshCore (payload type + payload, path length only for TRACE)
+- **`flood.max`** is enforced: it limits how far ADVERT floods travel (default 8)
+- **Own ADVERT echo** no longer adds the repeater to its own node list or time sync
+- **Security**
+  - Fixed a stack overflow reachable by an unauthenticated login packet
+  - Remote admin login is refused while the admin password is still the default `admin` (a warning is printed at boot)
+  - `acl` shows passwords only to admins
+- **Fixes** - EEPROM overlap between mailbox and region map; MeshCore aliases restored (`get tx`, `get radio`, `get repeat`, `get advert.interval`, `stats-radio`, `stats-packets`, `erase`)
+- **Smaller firmware** - ~15 KB Flash free (was ~256 bytes) with direct messages enabled; source split into modules
+- **Upgrade note** - the configuration layout changed: after flashing, settings return to defaults. Set name, passwords and radio options again
 
-## Previous Features (v0.5.0-v0.6.0)
+## Previous Features (v0.5.0-v0.7.0)
 
+- **Enhanced Link Quality Statistics** - RSSI/SNR moving averages per neighbour
+- **Adaptive TX Power** - `set tx auto on/off`, `txpower <5-21>`
 - **DIRECT Routing Support** - Full support for DIRECT routed packets (path peeling)
 - **Store-and-Forward Mailbox** - 2 persistent EEPROM + 4 volatile RAM slots
 - **System Health Dashboard** - `health` command with vitals and problem nodes
@@ -44,7 +42,6 @@ MeshCore-compatible repeater firmware for Heltec CubeCell HTCC-AB01.
 - Store-and-forward mailbox for offline nodes
 - Mesh health monitoring with automatic alerts
 - Full remote configuration via encrypted mesh CLI
-- Daily status reports sent to admin
 - Deep sleep support (~20 uA)
 - Battery and temperature telemetry
 - Neighbour tracking with quality statistics
@@ -57,8 +54,8 @@ MeshCore-compatible repeater firmware for Heltec CubeCell HTCC-AB01.
 
 - **Board**: Heltec CubeCell HTCC-AB01
 - **MCU**: ASR6501 (ARM Cortex-M0+ @ 48 MHz + SX1262)
-- **Flash**: 128 KB (99.8% used, ~256 bytes free)
-- **RAM**: 16 KB (53.1% used)
+- **Flash**: 128 KB (88.5% used, ~15 KB free)
+- **RAM**: 16 KB (52.4% used)
 - **Radio**: SX1262 LoRa (EU868: 869.618 MHz, BW 62.5 kHz, SF8, CR 4/8)
 
 ## Files Included

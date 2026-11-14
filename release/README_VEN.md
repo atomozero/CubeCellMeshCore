@@ -1,26 +1,26 @@
-# CubeCellMeshCore v0.7.0
+# CubeCellMeshCore v0.8.0
 
 Firmware par repeater MeshCore par el Heltec CubeCell HTCC-AB01.
 
-## Cossa ghe xe de novo ne la v0.7.0
+## Cossa ghe xe de novo ne la v0.8.0
 
-- **Statistiche Link Quality Miorae** - Medie mobili esponensiali (EMA) de RSSI/SNR par ogni visìn
-  - Nove metriche: `rssiAvg`, `snrAvg`, `pktCount`, `pktCountWindow`
-  - Finestre de misurassion de 60 secondi par calcolar el packet rate
-  - Comando `neighbours` el mostra valori corenti e medi
-  - Base par futuri algoritmi de routing inteligenti
-- **Potensa TX Adativa** - Regolassion automatica de la potensa de trasmission
-  - SNR > +10dB → Riduce potensa de 2 dBm (risparmio energia)
-  - SNR < -5dB → Aumenta potensa de 2 dBm (mior copertura)
-  - Range: 5-21 dBm con step de 2 dBm
-  - Comandi: `set tx auto on/off`, `txpower auto on/off`, `txpower <5-21>`
-- **Deduplicassion Pacheti** - Documentà cache ring-buffer a 32 slot
-  - Previen inoltro de pacheti duplicai
-  - Riduce congestione de la rete e previen loop
-- **Suite de Test** - Novo script de verifica `tools/test_adaptive_tx.py`
+- **Basta trafego perso** - I pacheti co hash del percorso da 2 o 3 byte (MeshCore 1.11+) i vegniva butai via come `Bad pkt`; desso i vien leti, deduplicai e inoltrai giusti. Provà par aria fin a 9 salti
+- **Pacheti TRACE** inoltrai come fa MeshCore
+- **Deduplicassion** compagna de MeshCore
+- **`flood.max`** desso el funsiona: el limita quanto lontan va i ADVERT (predefinio 8)
+- **Eco del proprio ADVERT** no'l mete pi el repeater tra i so nodi
+- **Sicuressa**
+  - Sistemà un overflow de stack che se podeva tirar fora co un pacheto de login sensa autenticassion
+  - El login admin da remoto el vien rifiutà fin che la password admin xe ancora `admin` (aviso a l'avvio)
+  - `acl` el mostra le password solo a l'admin
+- **Corression** - Sovraposission EEPROM tra mailbox e region map; tornai i alias MeshCore (`get tx`, `get radio`, `get repeat`, `get advert.interval`, `stats-radio`, `stats-packets`, `erase`)
+- **Firmware pi picolo** - ~15 KB de Flash libari, co i messagi direti ativi
+- **Ocio co l'agiornamento** - La configurassion la ga cambià formato: dopo el flash se torna ai valori predefinii. Rimeti nome, password e opzioni radio
 
-## Funzionalità Precedenti (v0.5.0-v0.6.0)
+## Funzionalità Precedenti (v0.5.0-v0.7.0)
 
+- **Statistiche Link Quality** - Medie mobili de RSSI/SNR par ogni visìn
+- **Potensa TX Adativa** - `set tx auto on/off`, `txpower <5-21>`
 - **Routing DIRECT** - Suporto completo par pacheti co rotta DIRECT (path peeling)
 - **Casseta de Posta (Mailbox)** - 2 posti EEPROM + 4 in RAM
 - **Dashboard Salute** - Comando `health` co vitali e nodi problematici
@@ -39,7 +39,6 @@ Firmware par repeater MeshCore par el Heltec CubeCell HTCC-AB01.
 - Casseta de posta par nodi offline (store-and-forward)
 - Monitor de la salute de la rete con alerte automatiche
 - Configurassion remota completa tramite CLI cifra'
-- Report giornaliero automatico a l'admin
 - Deep sleep (~20 uA de consumo)
 - Telemetria bateria e temperatura
 - Tracking dei visini (repeater direti a 0-hop)
@@ -50,8 +49,8 @@ Firmware par repeater MeshCore par el Heltec CubeCell HTCC-AB01.
 
 - **Scheda**: Heltec CubeCell HTCC-AB01
 - **MCU**: ASR6501 (ARM Cortex-M0+ @ 48 MHz + SX1262)
-- **Flash**: 128 KB (91.0% doparadi, ~12 KB libari)
-- **RAM**: 16 KB (47.9% doparadi)
+- **Flash**: 128 KB (88.5% doparadi, ~15 KB libari)
+- **RAM**: 16 KB (52.4% doparadi)
 - **Radio**: SX1262 LoRa (EU868: 869.618 MHz, BW 62.5 kHz, SF8, CR 4/8)
 
 ## File nel pacchetto

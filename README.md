@@ -273,6 +273,14 @@ MIT License - See LICENSE file for details.
 
 ## Changelog
 
+### v0.8.0 (2026-11-14)
+- **Lost traffic fixed** - `path_len` decoded as MeshCore does (hop count + hash size); packets with 2/3-byte path hashes are no longer dropped as `Bad pkt`
+- **TRACE** forwarding and **dedup** aligned with MeshCore; `flood.max` enforced on ADVERT floods
+- Own ADVERT echoed by neighbours is ignored
+- **Security** - stack overflow on unauthenticated ANON_REQ fixed; remote admin login refused with the default password; `acl` hides passwords from guests
+- EEPROM overlap between mailbox and region map fixed (config resets on upgrade); MeshCore command aliases restored
+- Refactor: modules (`cli/`, `radio/`, `mesh/`), ~15 KB Flash freed (printf without float, compact ed25519 scalar code), direct messages enabled, dead code removed
+
 ### v0.7.0 (2026-03-06)
 - **Enhanced Link Quality Statistics** - RSSI/SNR exponential moving averages (EMA)
   - New metrics: `rssiAvg`, `snrAvg`, `pktCount`, `pktCountWindow` per neighbour
