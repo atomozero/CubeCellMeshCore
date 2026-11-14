@@ -614,7 +614,7 @@ save
 <table>
   <thead><tr><th>Comando</th><th>Descrizione</th></tr></thead>
   <tbody>
-    <tr><td><code>set tx</code></td><td>Mostra potenza TX corrente e stato auto</td></tr>
+    <tr><td><code>get tx</code></td><td>Mostra potenza TX corrente e stato auto</td></tr>
     <tr><td><code>set tx &lt;dBm&gt;</code></td><td>Imposta potenza TX manuale (disabilita auto)</td></tr>
     <tr><td><code>set tx auto on</code></td><td>Abilita potenza TX adattiva</td></tr>
     <tr><td><code>set tx auto off</code></td><td>Disabilita auto, ripristina potenza massima</td></tr>
@@ -865,7 +865,7 @@ save
           <tr><td><code>set flood.max 15</code></td><td>Massimo hop per pacchetti flood</td></tr>
           <tr><td><code>set advert.interval 5</code></td><td>ADVERT ogni 5 minuti (scoperta rapida)</td></tr>
           <tr><td><code>set af 0</code></td><td>Duty cycle disabilitato (TX senza limiti)</td></tr>
-          <tr><td><code>txdelay 50</code></td><td>Ritardo ridotto: risposte pi&ugrave; rapide</td></tr>
+          <tr><td><code>set txdelay 50</code></td><td>Ritardo ridotto: risposte pi&ugrave; rapide</td></tr>
         </tbody>
       </table>
     </div>
@@ -909,7 +909,7 @@ save
           <tr><td><code>set flood.max 3</code></td><td>Pochi hop: riduce traffico di rete</td></tr>
           <tr><td><code>set advert.interval 30</code></td><td>ADVERT ogni 30 min: meno TX</td></tr>
           <tr><td><code>set af 20</code></td><td>Duty cycle 2x: pi&ugrave; attesa tra le trasmissioni</td></tr>
-          <tr><td><code>txdelay 200</code></td><td>Ritardo maggiore: meno collisioni, pi&ugrave; sleep</td></tr>
+          <tr><td><code>set txdelay 200</code></td><td>Ritardo maggiore: meno collisioni, pi&ugrave; sleep</td></tr>
           <tr><td><code>quiet 22 6</code></td><td>Inoltro ridotto dalle 22 alle 6</td></tr>
         </tbody>
       </table>
@@ -953,7 +953,7 @@ save
           <tr><td><code>set flood.max 7</code></td><td>Buon raggio multi-hop senza eccesso di traffico</td></tr>
           <tr><td><code>set advert.interval 10</code></td><td>ADVERT ogni 10 min: buon compromesso</td></tr>
           <tr><td><code>set af 10</code></td><td>Duty cycle 1.0x: standard</td></tr>
-          <tr><td><code>txdelay 100</code></td><td>Ritardo standard (default)</td></tr>
+          <tr><td><code>set txdelay 100</code></td><td>Ritardo standard (default)</td></tr>
         </tbody>
       </table>
     </div>

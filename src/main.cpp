@@ -14,6 +14,14 @@
 #include "innerWdt.h"
 #endif
 
+// EEPROM layout must not overlap (checked at compile time)
+static_assert(sizeof(NodeConfig) <= IDENTITY_EEPROM_OFFSET, "NodeConfig overlaps identity");
+static_assert(IDENTITY_EEPROM_OFFSET + sizeof(NodeIdentity) <= STATS_EEPROM_OFFSET, "Identity overlaps stats");
+static_assert(STATS_EEPROM_OFFSET + sizeof(PersistentStats) <= MAILBOX_EEPROM_OFFSET, "Stats overlap mailbox");
+static_assert(MAILBOX_EEPROM_OFFSET + sizeof(MailboxHeader) + MAILBOX_SLOTS * sizeof(MailboxSlot)
+              <= REGION_EEPROM_OFFSET, "Mailbox overlaps region map");
+static_assert(REGION_EEPROM_OFFSET + REGION_EEPROM_BYTES <= EEPROM_SIZE, "Region map exceeds EEPROM_SIZE");
+
 //=============================================================================
 // Main Setup & Loop
 //=============================================================================

@@ -214,24 +214,24 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
             CP("%ld.%06ld,%ld.%06ld\n", lat/1000000, abs(lat%1000000), lon/1000000, abs(lon%1000000));
         } else CP("No loc\n");
     }
-    else if (strcmp(cmd, "repeat") == 0) {
+    else if (strcmp(cmd, "repeat") == 0 || strcmp(cmd, "get repeat") == 0) {
         CP("Rpt:%s hops:%d\n", repeaterHelper.isRepeatEnabled() ? "on" : "off", repeaterHelper.getMaxFloodHops());
     }
-    else if (strcmp(cmd, "advert interval") == 0) {
+    else if (strcmp(cmd, "advert interval") == 0 || strcmp(cmd, "get advert.interval") == 0) {
         CP("Int:%lum next:%lus\n", advertGen.getInterval() / 60000, advertGen.getTimeUntilNext());
     }
-    else if (strcmp(cmd, "radiostats") == 0) {
+    else if (strcmp(cmd, "radiostats") == 0 || strcmp(cmd, "stats-radio") == 0) {
         const RadioStats& rs = repeaterHelper.getRadioStats();
         CP("Noise:%ddBm RSSI:%d SNR:%d.%ddB\n", rs.noiseFloor, rs.lastRssi, rs.lastSnr/4, abs(rs.lastSnr%4)*25);
         CP("Airtime TX:%lus RX:%lus\n", rs.txAirTimeSec, rs.rxAirTimeSec);
     }
-    else if (strcmp(cmd, "packetstats") == 0) {
+    else if (strcmp(cmd, "packetstats") == 0 || strcmp(cmd, "stats-packets") == 0) {
         const PacketStats& ps = repeaterHelper.getPacketStats();
         CP("RX:%lu TX:%lu FL:%lu/%lu DR:%lu/%lu\n",
             ps.numRecvPackets, ps.numSentPackets,
             ps.numRecvFlood, ps.numSentFlood, ps.numRecvDirect, ps.numSentDirect);
     }
-    else if (strcmp(cmd, "radio") == 0) {
+    else if (strcmp(cmd, "radio") == 0 || strcmp(cmd, "get radio") == 0) {
         { uint32_t fM = (uint32_t)(MC_FREQUENCY * 1000); uint32_t bT = (uint32_t)(MC_BANDWIDTH * 10);
         CP("%lu.%03lu BW%lu.%lu SF%d CR%d %ddBm\n", fM/1000, fM%1000, bT/10, bT%10, MC_SPREADING, MC_CODING_RATE, MC_TX_POWER); }
         if (tempRadioActive) {
@@ -335,7 +335,7 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
     else if (strcmp(cmd, "cb") == 0) {
         CP("CB:%d\n", repeaterHelper.getNeighbours().getCircuitBreakerCount());
     }
-    else if (strcmp(cmd, "txpower") == 0) {
+    else if (strcmp(cmd, "txpower") == 0 || strcmp(cmd, "get tx") == 0) {
         CP("TxP:%ddBm max:%d auto:%s\n", repeaterHelper.getCurrentTxPower(),
             MC_TX_POWER, repeaterHelper.isAdaptiveTxEnabled() ? "on" : "off");
     }
@@ -741,7 +741,7 @@ static bool dispatchSharedCommand(const char* cmd, CmdCtx& ctx, bool isAdmin) {
     else if (strcmp(cmd, "save") == 0) {
         saveConfig(); CP("saved\n");
     }
-    else if (strcmp(cmd, "reset") == 0) {
+    else if (strcmp(cmd, "reset") == 0 || strcmp(cmd, "erase") == 0) {
         resetConfig(); applyPowerSettings(); CP("reset\n");
     }
     else if (strcmp(cmd, "reboot") == 0) {

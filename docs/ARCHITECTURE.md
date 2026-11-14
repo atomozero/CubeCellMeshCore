@@ -177,12 +177,21 @@ Key hardware constraints:
 Crypto functions (Ed25519, AES) allocate 128-256 byte local buffers on the stack.
 Deep call chains risk silent stack overflow.
 
-### EEPROM (emulated, 576 bytes)
+### EEPROM (emulated, 584 of max 768 bytes)
 - Offset 0x000: NodeConfig (~112 bytes) - power, passwords, report/alert settings
 - Offset 0x080: Identity (~132 bytes) - Ed25519 keys, node name, location
 - Offset 0x118: PersistentStats (~50 bytes) - lifetime counters, CRC16
-- Offset 0x154: Mailbox (172 bytes) - 2 persistent store-and-forward slots
-- Offset 0x200: RegionMap (57 bytes) - 4 region entries + wildcard flags
+- Offset 0x154: Mailbox (184 bytes: 8 header + 2 x 88 slots) - store-and-forward
+- Offset 0x20C: RegionMap (57 bytes) - 4 region entries + wildcard flags
+
+Before 2026-11 RegionMap was at 0x200 and overlapped the last 12 bytes of
+mailbox slot 1. Mailbox format v2 resets the mailbox once on upgrade; saved
+regions are lost once and must be re-entered. `static_assert`s in main.cpp
+now fail the build if any two areas overlap.
+
+Upgrading from 0.5.x (config version 4) to config version 6 resets NodeConfig
+to defaults (passwords, power mode, alerts); identity, name, location and
+lifetime stats are kept.
 
 Flash wear: auto-save every 30 min = ~48 writes/day = ~5.7 years at 100K cycles.
 

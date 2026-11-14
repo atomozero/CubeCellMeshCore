@@ -12,7 +12,7 @@
 
 #define MAILBOX_EEPROM_OFFSET   340
 #define MAILBOX_MAGIC           0xBB0F
-#define MAILBOX_VERSION         1
+#define MAILBOX_VERSION         2       // v2: region data moved out of slot 1 (reset once)
 #define MAILBOX_SLOTS           2       // EEPROM persistent slots
 #define MAILBOX_RAM_SLOTS       4       // RAM overflow slots
 #define MAILBOX_PKT_MAX         76      // Max serialized packet size per slot
@@ -92,8 +92,16 @@ public:
             writeToEeprom();
             return;
         }
+        // Load slots, drop invalid ones and recount (header.count is not trusted)
+        uint8_t count = 0;
         for (uint8_t i = 0; i < MAILBOX_SLOTS; i++) {
             EEPROM.get(MAILBOX_EEPROM_OFFSET + sizeof(MailboxHeader) + i * sizeof(MailboxSlot), slots[i]);
+            if (slots[i].pktLen > MAILBOX_PKT_MAX) memset(&slots[i], 0, sizeof(MailboxSlot));
+            if (slots[i].pktLen > 0) count++;
+        }
+        if (header.count != count) {
+            header.count = count;
+            writeToEeprom();
         }
     }
 

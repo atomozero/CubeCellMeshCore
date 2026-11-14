@@ -613,7 +613,7 @@ save
 <table>
   <thead><tr><th>Command</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>set tx</code></td><td>Show current TX power and auto status</td></tr>
+    <tr><td><code>get tx</code></td><td>Show current TX power and auto status</td></tr>
     <tr><td><code>set tx &lt;dBm&gt;</code></td><td>Set manual TX power (disables auto)</td></tr>
     <tr><td><code>set tx auto on</code></td><td>Enable adaptive TX power</td></tr>
     <tr><td><code>set tx auto off</code></td><td>Disable auto, restore maximum power</td></tr>
@@ -859,7 +859,7 @@ save
           <tr><td><code>set flood.max 15</code></td><td>Maximum hops for flood packets</td></tr>
           <tr><td><code>set advert.interval 5</code></td><td>ADVERT every 5 minutes (fast discovery)</td></tr>
           <tr><td><code>set af 0</code></td><td>Duty cycle disabled (unlimited TX)</td></tr>
-          <tr><td><code>txdelay 50</code></td><td>Shorter delay: faster responses</td></tr>
+          <tr><td><code>set txdelay 50</code></td><td>Shorter delay: faster responses</td></tr>
         </tbody>
       </table>
     </div>
@@ -903,7 +903,7 @@ save
           <tr><td><code>set flood.max 3</code></td><td>Few hops: less network traffic</td></tr>
           <tr><td><code>set advert.interval 30</code></td><td>ADVERT every 30 min: fewer transmissions</td></tr>
           <tr><td><code>set af 20</code></td><td>Duty cycle 2x: longer wait between transmissions</td></tr>
-          <tr><td><code>txdelay 200</code></td><td>Longer delay: fewer collisions, more sleep</td></tr>
+          <tr><td><code>set txdelay 200</code></td><td>Longer delay: fewer collisions, more sleep</td></tr>
           <tr><td><code>quiet 22 6</code></td><td>Reduced forwarding from 22:00 to 06:00</td></tr>
         </tbody>
       </table>
@@ -947,7 +947,7 @@ save
           <tr><td><code>set flood.max 7</code></td><td>Good multi-hop range without excess traffic</td></tr>
           <tr><td><code>set advert.interval 10</code></td><td>ADVERT every 10 min: good compromise</td></tr>
           <tr><td><code>set af 10</code></td><td>Duty cycle 1.0x: standard</td></tr>
-          <tr><td><code>txdelay 100</code></td><td>Standard delay (default)</td></tr>
+          <tr><td><code>set txdelay 100</code></td><td>Standard delay (default)</td></tr>
         </tbody>
       </table>
     </div>

@@ -10,9 +10,10 @@
 #define REGION_DENY_FLOOD     0x01
 
 // EEPROM persistence
-#define REGION_EEPROM_OFFSET  512
+#define REGION_EEPROM_OFFSET  524       // After mailbox (340 + 8 + 2*88); was 512 (overlapped mailbox)
 #define REGION_EEPROM_MAGIC   0x5247    // "RG"
 #define REGION_SAVE_NAME_LEN  12        // Compact name in EEPROM (enough for "au-nsw" etc.)
+#define REGION_EEPROM_BYTES   (2 + 1 + 1 + REGION_MAX_ENTRIES * (REGION_SAVE_NAME_LEN + 1))  // 57
 
 struct RegionEntry {
     char name[REGION_NAME_LEN];
